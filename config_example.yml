@@ -1,0 +1,58 @@
+database:
+  driver: postgres
+  dsn: "host=localhost port=5432 user=test dbname=testdb sslmode=disable"
+
+output:
+  format: "json"
+# format: "html"
+  file: "results.json"
+# file: "results.html"
+
+metrics:
+  influx_host: "http://localhost"
+  influx_port: 8086
+  influx_db: "loadhoud_metrics"
+
+scenario:
+  - stage:
+    name: "stage_1"
+    ramp_up: "5m"
+    duration: "50m"
+    workers: 10
+    ramp_down: "1m"
+    on_failure: "stop"
+  - stage:
+    name: "stage_2"
+    ramp_up: "5m"
+    duration: "25m"
+    workers: 15
+    ramp_down: "1m"
+    on_failure: "continue"
+
+data_pool:
+  path: "/home/uluk/documents/loadhoud_data_pool/data.csv"
+# rule: "random" 
+  rule:
+    type: "sequence"
+    at_end: "stop_test"
+#   at_end: "continue"
+#   at_end: "start_over"
+  after_get: "delete_value"
+# after_get: "do_nothing"
+
+queries:
+  - name: "update_book"
+    weight: 60
+    pacing: "10s"
+    sql:
+      - value: "SELECT * FROM books WHERE id = {{ intRand 1 100 }}"
+        sleep_time: "1s"
+      - value: "UPDATE books SET price = {{ float64Rand 10.4 22.6 }} WHERE id = {{ intRand 1 100 }}"
+        sleep_time: "2s"
+
+  - name: "select_author"
+    weight: 40
+    pacing: "5s"
+    sql:
+      - value: "SELECT * FROM authors WHERE name = \"Mark Twain\""
+        sleep_time: "1s"
