@@ -7,8 +7,18 @@ Licensed under the MIT License.
 
 package main
 
-import "github.com/Ulukbek-Toichuev/loadhound/cmd"
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/Ulukbek-Toichuev/loadhound/cmd"
+)
 
 func main() {
-	cmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer stop()
+
+	cmd.Execute(ctx)
 }

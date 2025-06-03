@@ -25,3 +25,9 @@ go.work.sum
 .env
 
 config.yml
+
+# any .sql files
+*.sql
+
+# Goland IDE files
+*.idea
