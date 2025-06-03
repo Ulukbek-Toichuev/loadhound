@@ -136,6 +136,3 @@ func runQuickTest(ctx context.Context, qr *QuickRun) error {
 	wg.Wait()
 	return nil
 }
-
-// query := "SELECT * FROM users LIMIT"
-// url := "postgres://postgres:Rewq_1234@185.121.233.53:5432/user_management?sslmode=disable"
