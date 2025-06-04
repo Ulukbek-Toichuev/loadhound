@@ -10,8 +10,12 @@ package internal
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
+	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 )
 
 type QuickRunErr struct {
@@ -51,7 +55,10 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
 		return err
 	}
 
-	runQuickTest(ctx, qr)
+	st := runQuickTest(ctx, qr)
+	if st != nil {
+		stat.PrintSummary(st)
+	}
 	return nil
 }
 
@@ -91,48 +98,49 @@ func validateQuickRunFields(qr *QuickRun) error {
 		return NewQuickRunErr("--pacing must be > 0", nil)
 	}
 
+	log.Println("fields of config are successfully validated")
 	return nil
 }
 
-func runQuickTest(ctx context.Context, qr *QuickRun) error {
-	cn := GetPgxConn(context.Background(), qr.Dsn)
+func runQuickTest(ctx context.Context, qr *QuickRun) *stat.Stat {
+	connectionPool := db.GetPgxConn(ctx, qr.Dsn)
+	log.Println("connection pool successfully init")
 
-	perWorker := qr.Iterations / qr.Workers
-
-	execQuery := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		rows, dur, err := cn.QueryRowsWithLatency(ctx, qr.Query)
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-		fmt.Printf("rows count: %d -- duration: %d ms\n", rows, dur)
+	if qr.Iterations != 0 && qr.Duration == 0 {
+		log.Println("prepare test for execute by iterations")
+		return execTestByIter(ctx, qr, connectionPool)
 	}
+	return nil
+}
 
+func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx) *stat.Stat {
+	var st stat.Stat
 	var wg sync.WaitGroup
+	var itersByWorker int = qr.Iterations / qr.Workers
+	startSignal := make(chan struct{})
+
 	for i := 0; i < qr.Workers; i++ {
 		wg.Add(1)
-		select {
-		case <-ctx.Done():
-			fmt.Println("get signal from gracefull shutdown")
-			return nil
-		default:
-			go func(wg *sync.WaitGroup, workerId int) {
-				defer wg.Done()
-				for i := 0; i < perWorker; i++ {
-					select {
-					case <-ctx.Done():
-						fmt.Printf("get signal from gracefull shutdown, worker id: %d\n", i)
-						return
-					default:
-						execQuery()
-					}
+		workerId := i
+		go func(st *stat.Stat, wg *sync.WaitGroup, workerId int) {
+			<-startSignal
+			defer wg.Done()
+			for i := 0; i < itersByWorker; i++ {
+				select {
+				case <-ctx.Done():
+					fmt.Printf("worker_id: %d: cancelled\n", workerId)
+					return
+				default:
+					queryStat, err := connectionPool.QueryRowsWithLatency(ctx, qr.Query)
+					stat.CollectStat(st, queryStat, err)
+					stat.PrintCurrStat(workerId, i, queryStat)
 				}
-			}(&wg, i)
-		}
+			}
+		}(&st, &wg, workerId)
 	}
 
+	log.Printf("sent a start signal to workers\n\n")
+	close(startSignal)
 	wg.Wait()
-	return nil
+	return &st
 }
