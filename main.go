@@ -14,7 +14,12 @@ import (
 	"syscall"
 
 	"github.com/Ulukbek-Toichuev/loadhound/cmd"
+	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 )
+
+func init() {
+	pkg.PrintAsciiArtLogo()
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
