@@ -55,9 +55,10 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
 		return err
 	}
 
+	startTestTime := time.Now()
 	st := runQuickTest(ctx, qr)
 	if st != nil {
-		stat.PrintSummary(st)
+		stat.PrintSummary(stat.NewSummaryStat(st, startTestTime, time.Now(), qr.Workers, qr.Iterations))
 	}
 	return nil
 }
@@ -106,14 +107,31 @@ func runQuickTest(ctx context.Context, qr *QuickRun) *stat.Stat {
 	connectionPool := db.GetPgxConn(ctx, qr.Dsn)
 	log.Println("connection pool successfully init")
 
+	log.Println("prepare worker for collect stats")
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	queryChan := make(chan *stat.QueryStat, qr.Workers)
+
+	globalStat := stat.NewStat()
+	go func(wg *sync.WaitGroup, gs *stat.Stat) {
+		defer wg.Done()
+		for st := range queryChan {
+			gs.SubmitStat(st)
+		}
+	}(&wg, globalStat)
+
 	if qr.Iterations != 0 && qr.Duration == 0 {
 		log.Println("prepare test for execute by iterations")
-		return execTestByIter(ctx, qr, connectionPool)
+		execTestByIter(ctx, qr, connectionPool, queryChan)
 	}
-	return nil
+
+	close(queryChan)
+	wg.Wait()
+	return globalStat
 }
 
-func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx) *stat.Stat {
+func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx, queryChan chan *stat.QueryStat) *stat.Stat {
 	var st stat.Stat
 	var wg sync.WaitGroup
 	var itersByWorker int = qr.Iterations / qr.Workers
@@ -131,9 +149,8 @@ func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.Custom
 					fmt.Printf("worker_id: %d: cancelled\n", workerId)
 					return
 				default:
-					queryStat, err := connectionPool.QueryRowsWithLatency(ctx, qr.Query)
-					stat.CollectStat(st, queryStat, err)
-					stat.PrintCurrStat(workerId, i, queryStat)
+					queryStat, _ := connectionPool.QueryRowsWithLatency(ctx, qr.Query)
+					queryChan <- queryStat
 				}
 			}
 		}(&st, &wg, workerId)
