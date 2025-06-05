@@ -11,18 +11,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type QueryStat struct {
-	Latency      time.Duration
-	Err          error
-	AffectedRows int64
-}
 
 type CustomConnPgx struct {
 	*pgxpool.Pool
@@ -56,21 +51,21 @@ func (c *CustomConnPgx) ExecWithLatency(ctx context.Context, query string) (pgco
 	return tag, latency, nil
 }
 
-func (c *CustomConnPgx) QueryRowsWithLatency(ctx context.Context, query string) (*QueryStat, error) {
+func (c *CustomConnPgx) QueryRowsWithLatency(ctx context.Context, query string) (*stat.QueryStat, error) {
 	var r int64
 	start := time.Now()
 	rows, err := c.Query(ctx, query)
 	latency := time.Since(start)
 
 	if err != nil {
-		return &QueryStat{latency, err, r}, err
+		return stat.NewQueryStat(latency, err, r), err
 	}
 
 	defer rows.Close()
 	for rows.Next() {
 		r++
 	}
-	return &QueryStat{latency, err, r}, nil
+	return stat.NewQueryStat(latency, err, r), nil
 }
 
 func (c *CustomConnPgx) QueryWithLatency(ctx context.Context, query string) (pgconn.CommandTag, time.Duration, error) {
