@@ -8,53 +8,64 @@ Licensed under the MIT License.
 package stat
 
 import (
-	"sync/atomic"
+	"sync"
+	"time"
 )
 
+type QueryStat struct {
+	Latency      time.Duration
+	Err          error
+	AffectedRows int64
+}
+
+func NewQueryStat(latency time.Duration, err error, affectedRows int64) *QueryStat {
+	return &QueryStat{latency, err, affectedRows}
+}
+
 type Stat struct {
-	success     atomic.Int64
-	failed      atomic.Int64
-	total       atomic.Int64
-	min_latency atomic.Int64
-	max_latency atomic.Int64
+	mu          sync.Mutex
+	Success     int
+	Failed      int
+	Total       int
+	Min_latency time.Duration
+	Max_latency time.Duration
 }
 
-func (s *Stat) IncrementSuccess() {
-	s.success.Add(1)
+func NewStat() *Stat {
+	return &Stat{mu: sync.Mutex{}}
 }
 
-func (s *Stat) IncrementFailed() {
-	s.failed.Add(1)
+func (s *Stat) SubmitStat(qr *QueryStat) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if qr.Err != nil {
+		s.Failed++
+	} else {
+		s.Success++
+	}
+
+	if qr.Latency < s.Min_latency && s.Min_latency != 0 {
+		s.Min_latency = qr.Latency
+	} else if qr.Latency > s.Max_latency {
+		s.Max_latency = qr.Latency
+	}
+
+	if s.Min_latency == 0 {
+		s.Min_latency = qr.Latency
+	}
+
+	s.Total++
 }
 
-func (s *Stat) IncrementTotal() {
-	s.total.Add(1)
+type SummaryStat struct {
+	TestStart    time.Time
+	TestEnd      time.Time
+	TotalStat    *Stat
+	WorkersCount int
+	Iterations   int
 }
 
-func (s *Stat) SetMax(max int64) int64 {
-	return s.max_latency.Swap(max)
-}
-
-func (s *Stat) SetMin(min int64) int64 {
-	return s.min_latency.Swap(min)
-}
-
-func (s *Stat) SuccessValue() int {
-	return int(s.success.Load())
-}
-
-func (s *Stat) FailedValue() int {
-	return int(s.failed.Load())
-}
-
-func (s *Stat) TotalValue() int {
-	return int(s.total.Load())
-}
-
-func (s *Stat) MaxValue() int64 {
-	return s.max_latency.Load()
-}
-
-func (s *Stat) MinValue() int64 {
-	return s.min_latency.Load()
+func NewSummaryStat(totalStat *Stat, testStart, testEnd time.Time, workersCount, iterations int) *SummaryStat {
+	return &SummaryStat{testStart, testEnd, totalStat, workersCount, iterations}
 }
