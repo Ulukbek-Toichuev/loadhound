@@ -11,11 +11,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
+	"github.com/Ulukbek-Toichuev/loadhound/pkg"
+
+	"github.com/google/uuid"
 )
 
 type QuickRunErr struct {
@@ -55,8 +60,14 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
 		return err
 	}
 
+	tmpl := template.New(qr.Query)
+	tmpl, err = tmpl.Parse(qr.Query)
+	if err != nil {
+		pkg.PrintFatal("failed to parse your query", err)
+	}
+
 	startTestTime := time.Now()
-	st := runQuickTest(ctx, qr)
+	st := runQuickTest(ctx, qr, tmpl)
 	if st != nil {
 		stat.PrintSummary(stat.NewSummaryStat(st, startTestTime, time.Now(), qr.Workers, qr.Iterations))
 	}
@@ -103,7 +114,7 @@ func validateQuickRunFields(qr *QuickRun) error {
 	return nil
 }
 
-func runQuickTest(ctx context.Context, qr *QuickRun) *stat.Stat {
+func runQuickTest(ctx context.Context, qr *QuickRun, tmpl *template.Template) *stat.Stat {
 	connectionPool := db.GetPgxConn(ctx, qr.Dsn)
 	log.Println("connection pool successfully init")
 
@@ -111,7 +122,7 @@ func runQuickTest(ctx context.Context, qr *QuickRun) *stat.Stat {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	queryChan := make(chan *stat.QueryStat, qr.Workers)
+	queryChan := make(chan *stat.QueryStat, qr.Workers*2)
 
 	globalStat := stat.NewStat()
 	go func(wg *sync.WaitGroup, gs *stat.Stat) {
@@ -123,7 +134,7 @@ func runQuickTest(ctx context.Context, qr *QuickRun) *stat.Stat {
 
 	if qr.Iterations != 0 && qr.Duration == 0 {
 		log.Println("prepare test for execute by iterations")
-		execTestByIter(ctx, qr, connectionPool, queryChan)
+		execTestByIter(ctx, qr, connectionPool, queryChan, tmpl)
 	}
 
 	close(queryChan)
@@ -131,33 +142,61 @@ func runQuickTest(ctx context.Context, qr *QuickRun) *stat.Stat {
 	return globalStat
 }
 
-func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx, queryChan chan *stat.QueryStat) *stat.Stat {
-	var st stat.Stat
+func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx, queryChan chan *stat.QueryStat, tmpl *template.Template) {
 	var wg sync.WaitGroup
-	var itersByWorker int = qr.Iterations / qr.Workers
+	itersPerWorker := make([]int, qr.Workers)
+	for i := 0; i < qr.Iterations; i++ {
+		itersPerWorker[i%qr.Workers]++
+	}
 	startSignal := make(chan struct{})
 
 	for i := 0; i < qr.Workers; i++ {
 		wg.Add(1)
 		workerId := i
-		go func(st *stat.Stat, wg *sync.WaitGroup, workerId int) {
+		iters := itersPerWorker[i]
+		go func(wg *sync.WaitGroup, workerId int, iters int) {
 			<-startSignal
 			defer wg.Done()
-			for i := 0; i < itersByWorker; i++ {
+			for i := 0; i < iters; i++ {
 				select {
 				case <-ctx.Done():
 					fmt.Printf("worker_id: %d: cancelled\n", workerId)
 					return
 				default:
-					queryStat, _ := connectionPool.QueryRowsWithLatency(ctx, qr.Query)
+					preparedQuery := buildStmt(tmpl)
+					fmt.Println(preparedQuery)
+					queryStat, err := connectionPool.QueryRowsWithLatency(ctx, preparedQuery)
+					if err != nil {
+						log.Printf("worker_id: %d query failed: %v\n", workerId, err)
+						continue // TODO think what we do with error
+					}
 					queryChan <- queryStat
 				}
 			}
-		}(&st, &wg, workerId)
+		}(&wg, workerId, iters)
 	}
 
 	log.Printf("sent a start signal to workers\n\n")
 	close(startSignal)
 	wg.Wait()
-	return &st
+}
+
+func buildStmt(t *template.Template) string {
+	sb := &strings.Builder{}
+
+	data := struct {
+		RandIntRange       func(min, max int) int
+		RandFloat64InRange func(min, max float64) float64
+		RandUUID           func() *uuid.UUID
+		RandStringInRange  func(min, max int) string
+	}{
+		RandIntRange:       pkg.RandIntRange,
+		RandFloat64InRange: pkg.RandFloat64InRange,
+		RandUUID:           pkg.RandUUID,
+		RandStringInRange:  pkg.RandStringInRange,
+	}
+	if err := t.Execute(sb, data); err != nil {
+		pkg.PrintFatal("failed to execute template", err)
+	}
+	return sb.String()
 }
