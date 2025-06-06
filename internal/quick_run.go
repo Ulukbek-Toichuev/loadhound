@@ -67,7 +67,7 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
 	}
 
 	startTestTime := time.Now()
-	st := runQuickTest(ctx, qr, tmpl)
+	st := runTest(ctx, qr, tmpl)
 	if st != nil {
 		stat.PrintSummary(stat.NewSummaryStat(st, startTestTime, time.Now(), qr.Workers, qr.Iterations))
 	}
@@ -114,7 +114,7 @@ func validateQuickRunFields(qr *QuickRun) error {
 	return nil
 }
 
-func runQuickTest(ctx context.Context, qr *QuickRun, tmpl *template.Template) *stat.Stat {
+func runTest(ctx context.Context, qr *QuickRun, tmpl *template.Template) *stat.Stat {
 	connectionPool := db.GetPgxConn(ctx, qr.Dsn)
 	log.Println("connection pool successfully init")
 
@@ -134,7 +134,7 @@ func runQuickTest(ctx context.Context, qr *QuickRun, tmpl *template.Template) *s
 
 	if qr.Iterations != 0 && qr.Duration == 0 {
 		log.Println("prepare test for execute by iterations")
-		execTestByIter(ctx, qr, connectionPool, queryChan, tmpl)
+		runTestByIterations(ctx, qr, connectionPool, queryChan, tmpl)
 	}
 
 	close(queryChan)
@@ -142,7 +142,7 @@ func runQuickTest(ctx context.Context, qr *QuickRun, tmpl *template.Template) *s
 	return globalStat
 }
 
-func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx, queryChan chan *stat.QueryStat, tmpl *template.Template) {
+func runTestByIterations(ctx context.Context, qr *QuickRun, connectionPool *db.CustomConnPgx, queryChan chan *stat.QueryStat, tmpl *template.Template) {
 	var wg sync.WaitGroup
 	itersPerWorker := make([]int, qr.Workers)
 	for i := 0; i < qr.Iterations; i++ {
@@ -152,33 +152,67 @@ func execTestByIter(ctx context.Context, qr *QuickRun, connectionPool *db.Custom
 
 	for i := 0; i < qr.Workers; i++ {
 		wg.Add(1)
-		workerId := i
+		workerID := i
 		iters := itersPerWorker[i]
-		go func(wg *sync.WaitGroup, workerId int, iters int) {
+		go func(wg *sync.WaitGroup, workerID int, iters int) {
 			<-startSignal
 			defer wg.Done()
 			for i := 0; i < iters; i++ {
 				select {
 				case <-ctx.Done():
-					fmt.Printf("worker_id: %d: cancelled\n", workerId)
+					fmt.Printf("worker_id: %d: cancelled\n", workerID)
 					return
 				default:
-					preparedQuery := buildStmt(tmpl)
-					fmt.Println(preparedQuery)
-					queryStat, err := connectionPool.QueryRowsWithLatency(ctx, preparedQuery)
+					queryStat, err := execQuery(ctx, connectionPool, tmpl)
 					if err != nil {
-						log.Printf("worker_id: %d query failed: %v\n", workerId, err)
-						continue // TODO think what we do with error
+						log.Printf("worker_id: %d query failed: %v\n", workerID, err)
+						continue
 					}
-					queryChan <- queryStat
+					select {
+					case <-ctx.Done():
+						return
+					case queryChan <- queryStat:
+					}
 				}
 			}
-		}(&wg, workerId, iters)
+		}(&wg, workerID, iters)
 	}
 
 	log.Printf("sent a start signal to workers\n\n")
 	close(startSignal)
 	wg.Wait()
+}
+
+func execQuery(ctx context.Context, connectionPool *db.CustomConnPgx, tmpl *template.Template) (*stat.QueryStat, error) {
+	preparedQuery := buildStmt(tmpl)
+	execType := getExecType(preparedQuery)
+	if execType == "" {
+		return nil, fmt.Errorf("unsupported query type: %s", preparedQuery)
+	}
+
+	var queryStat *stat.QueryStat
+	var e error
+	if execType == "query" {
+		q, err := connectionPool.QueryRowsWithLatency(ctx, preparedQuery)
+		queryStat = q
+		e = err
+	} else if execType == "exec" {
+		q, err := connectionPool.ExecWithLatency(ctx, preparedQuery)
+		queryStat = q
+		e = err
+	}
+	return queryStat, e
+}
+
+func getExecType(query string) string {
+	query = strings.ToUpper(query)
+	if strings.HasPrefix(query, "INSERT") || strings.HasPrefix(query, "UPDATE") || strings.HasPrefix(query, "DELETE") {
+		return "exec"
+	} else if strings.HasPrefix(query, "SELECT") {
+		return "query"
+	}
+
+	return ""
 }
 
 func buildStmt(t *template.Template) string {
@@ -189,11 +223,13 @@ func buildStmt(t *template.Template) string {
 		RandFloat64InRange func(min, max float64) float64
 		RandUUID           func() *uuid.UUID
 		RandStringInRange  func(min, max int) string
+		GetTime            func() string
 	}{
 		RandIntRange:       pkg.RandIntRange,
 		RandFloat64InRange: pkg.RandFloat64InRange,
 		RandUUID:           pkg.RandUUID,
 		RandStringInRange:  pkg.RandStringInRange,
+		GetTime:            pkg.GetTime,
 	}
 	if err := t.Execute(sb, data); err != nil {
 		pkg.PrintFatal("failed to execute template", err)

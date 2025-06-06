@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"time"
 
 	"github.com/common-nighthawk/go-figure"
 	"github.com/google/uuid"
@@ -50,6 +51,10 @@ func RandStringInRange(min, max int) string {
 		b[i] = letters[rand.IntN(len(letters))]
 	}
 	return string(b)
+}
+
+func GetTime() string {
+	return time.Now().Format("2006-01-02 15:04:05.999999")
 }
 
 func PrintFatal(msg string, err error) {

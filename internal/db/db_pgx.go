@@ -40,15 +40,15 @@ func GetPgxConn(ctx context.Context, url string) *CustomConnPgx {
 	return &CustomConnPgx{pool}
 }
 
-func (c *CustomConnPgx) ExecWithLatency(ctx context.Context, query string) (pgconn.CommandTag, time.Duration, error) {
+func (c *CustomConnPgx) ExecWithLatency(ctx context.Context, query string) (*stat.QueryStat, error) {
 	start := time.Now()
 	tag, err := c.Exec(ctx, query)
 	latency := time.Since(start)
 
 	if err != nil {
-		return pgconn.CommandTag{}, latency, err
+		return stat.NewQueryStat(latency, err, tag.RowsAffected()), err
 	}
-	return tag, latency, nil
+	return stat.NewQueryStat(latency, err, tag.RowsAffected()), nil
 }
 
 func (c *CustomConnPgx) QueryRowsWithLatency(ctx context.Context, query string) (*stat.QueryStat, error) {
