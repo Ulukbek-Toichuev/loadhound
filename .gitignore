@@ -31,3 +31,6 @@ config.yml
 
 # Goland IDE files
 *.idea
+
+# .sh files
+*.sh
