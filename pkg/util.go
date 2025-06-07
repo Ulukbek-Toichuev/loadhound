@@ -57,6 +57,10 @@ func GetTime() string {
 	return time.Now().Format("2006-01-02 15:04:05.999999")
 }
 
+func LogWrapper(msg string) {
+	fmt.Printf("==> %s\n", msg)
+}
+
 func PrintFatal(msg string, err error) {
 	fmt.Printf("%s: %v", msg, err)
 	os.Exit(1)
