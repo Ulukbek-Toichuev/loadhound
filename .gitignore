@@ -34,3 +34,6 @@ config.yml
 
 # .sh files
 *.sh
+
+# .json files
+*.json
