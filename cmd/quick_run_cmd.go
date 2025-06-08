@@ -19,7 +19,7 @@ const (
 	default_iteration   int           = 1
 	default_duration    time.Duration = 0
 	default_pacing      time.Duration = 0
-	default_output_file string        = "result.json"
+	default_output_file string        = ""
 )
 
 func GetQuickRunCmd() *cobra.Command {
