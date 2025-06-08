@@ -106,6 +106,7 @@ func (q *QExecutor) runWorker(ctx context.Context, workerID, iters int, startSig
 			return
 		}
 		queryStat, err := q.execQuery(ctx)
+		time.Sleep(q.qr.Pacing)
 		if err != nil {
 			log.Printf("worker_id: %d query failed: %v\n", workerID, err)
 			continue
