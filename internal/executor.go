@@ -13,6 +13,7 @@ import (
 	"log"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
@@ -67,13 +68,15 @@ type QExecutor struct {
 }
 
 func NewQExecutor(qr *QuickRun, connPool *db.CustomConnPgx, queryChan chan *stat.QueryStat, tmpl *template.Template) *QExecutor {
-	typeStr := GetQueryType(qr.Query)
-	if typeStr == "" {
-		pkg.PrintFatal(fmt.Sprintf("unsupported query type: %s", qr.Query), nil)
+	preparedQuery, err := PrepareQuery(qr.Query)
+	if err != nil {
+		pkg.PrintFatal(fmt.Sprintf("failed to sanitize query: %s", err.Error()), err)
 	}
+
+	qr.Query = preparedQuery.RawSQL
 	return &QExecutor{
 		qr:        qr,
-		queryType: typeStr,
+		queryType: preparedQuery.QueryType,
 		connPool:  connPool,
 		queryChan: queryChan,
 		tmpl:      tmpl,
@@ -120,7 +123,7 @@ func (q *QExecutor) runWorker(ctx context.Context, workerID, iters int, startSig
 }
 
 func (q *QExecutor) execQuery(ctx context.Context) (*stat.QueryStat, error) {
-	preparedQuery, err := BuildStmt(q.tmpl)
+	preparedQuery, err := RenderTemplateQuery(q.tmpl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build statement from template: %v", err)
 	}
