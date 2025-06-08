@@ -8,80 +8,94 @@ Licensed under the MIT License.
 package internal
 
 import (
+	"regexp"
 	"strings"
 	"text/template"
 
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
-
 	"github.com/google/uuid"
 )
 
-type ParseErr struct {
+const (
+	QueryTypeExec    = "exec"
+	QueryTypeRead    = "query"
+	QueryTypeUnknown = "unknown"
+)
+
+// ParseError represents an error that occurred during query parsing.
+type ParseError struct {
 	Message string
 	Err     error
 }
 
-func NewParseErr(msg string, err error) *ParseErr {
-	return &ParseErr{msg, err}
+func NewParseError(msg string, err error) *ParseError {
+	return &ParseError{msg, err}
 }
 
-func (q *ParseErr) Error() string {
-	return q.Message
+func (e *ParseError) Error() string {
+	return e.Message
 }
 
-func (q *ParseErr) Unwrap() error {
-	return q.Err
+func (e *ParseError) Unwrap() error {
+	return e.Err
 }
 
-func ValidateQuickRunFields(qr *QuickRun) error {
-	if qr.Dsn == "" {
-		return NewParseErr("--dsn is required", nil)
-	}
-
-	if qr.Query == "" {
-		return NewParseErr("--query is required", nil)
-	}
-
-	if qr.Workers < 0 {
-		return NewParseErr("--workers must be >= 0", nil)
-	}
-
-	iterations := qr.Iterations
-	duration := qr.Duration
-
-	if iterations < 0 {
-		return NewParseErr("--iterations must be >= 0", nil)
-	}
-
-	if duration < 0 {
-		return NewParseErr("--duration must be >= 0", nil)
-	}
-
-	if iterations == 0 && duration == 0 {
-		return NewParseErr("either --iter or --duration must be set", nil)
-	}
-
-	if iterations > 0 && duration > 0 {
-		return NewParseErr("--iter and --duration are mutually exclusive", nil)
-	}
-
-	if qr.Pacing < 0 {
-		return NewParseErr("--pacing must be > 0", nil)
-	}
-	return nil
+// PreparedQuery holds cleaned query text and its type.
+type PreparedQuery struct {
+	RawSQL    string
+	QueryType string
 }
 
-func GetQueryType(query string) string {
-	query = strings.ToUpper(query)
-	if strings.HasPrefix(query, "INSERT") || strings.HasPrefix(query, "UPDATE") || strings.HasPrefix(query, "DELETE") {
-		return "exec"
-	} else if strings.HasPrefix(query, "SELECT") {
-		return "query"
-	}
-	return ""
+func NewPreparedQuery(sql string, typ string) *PreparedQuery {
+	return &PreparedQuery{RawSQL: sql, QueryType: typ}
 }
 
-func BuildStmt(t *template.Template) (string, error) {
+// PrepareQuery cleans the query and classifies its type.
+func PrepareQuery(query string) (*PreparedQuery, error) {
+	clean := removeComments(query)
+	if clean == "" {
+		return nil, NewParseError("query contains only comments", nil)
+	}
+	return classifyQuery(clean), nil
+}
+
+func removeComments(sql string) string {
+	reMultiline := regexp.MustCompile(`(?s)/\*.*?\*/`)
+	sql = reMultiline.ReplaceAllString(sql, "")
+
+	reSingleLine := regexp.MustCompile(`(?m)--.*$`)
+	sql = reSingleLine.ReplaceAllString(sql, "")
+
+	return strings.TrimSpace(sql)
+}
+
+func classifyQuery(sql string) *PreparedQuery {
+	upper := strings.ToUpper(sql)
+	switch {
+	case strings.HasPrefix(upper, "INSERT"),
+		strings.HasPrefix(upper, "UPDATE"),
+		strings.HasPrefix(upper, "DELETE"):
+		return NewPreparedQuery(sql, QueryTypeExec)
+	case strings.HasPrefix(upper, "SELECT"),
+		strings.HasPrefix(upper, "WITH"):
+		return NewPreparedQuery(sql, QueryTypeRead)
+	default:
+		return NewPreparedQuery(sql, QueryTypeUnknown)
+	}
+}
+
+// ParseQueryTemplate parses a SQL query with Go templating syntax.
+func ParseQueryTemplate(query string) (*template.Template, error) {
+	tmpl := template.New(query)
+	tmpl, err := tmpl.Parse(query)
+	if err != nil {
+		return nil, NewParseError("failed to parse query template", err)
+	}
+	return tmpl, nil
+}
+
+// RenderTemplateQuery executes a parsed query template with data functions.
+func RenderTemplateQuery(t *template.Template) (string, error) {
 	sb := &strings.Builder{}
 
 	data := struct {
@@ -97,18 +111,9 @@ func BuildStmt(t *template.Template) (string, error) {
 		RandStringInRange:  pkg.RandStringInRange,
 		GetTime:            pkg.GetTime,
 	}
+
 	if err := t.Execute(sb, data); err != nil {
-		return "", NewParseErr("failed to execute template", err)
+		return "", NewParseError("failed to execute query template", err)
 	}
 	return sb.String(), nil
-}
-
-func GetTemplate(query string) (*template.Template, error) {
-	tmpl := template.New(query)
-	tmpl, err := tmpl.Parse(query)
-	if err != nil {
-		return nil, NewParseErr("failed to parse query", err)
-	}
-
-	return tmpl, nil
 }
