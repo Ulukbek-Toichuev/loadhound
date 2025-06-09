@@ -20,127 +20,138 @@ import (
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 )
 
-func ExecuteQuickTest(ctx context.Context, qr *QuickRun, tmpl *template.Template) *stat.Stat {
-	pkg.LogWrapper("Initializing connection pool...")
-	connectionPool := db.GetPgxConn(ctx, qr.Dsn)
+type QueryRunner interface {
+	Run(ctx context.Context) (*stat.QueryStat, error)
+}
 
-	queryChan := make(chan *stat.QueryStat, qr.Workers*2)
-	globalStat := stat.NewStat()
+type LoadTestExecutor struct {
+	cfg       *QuickRun
+	conn      *db.CustomConnPgx
+	tmpl      *template.Template
+	queryChan chan *stat.QueryStat
+	queryFunc QueryRunner
+}
 
+func NewLoadTestExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Template) (*LoadTestExecutor, error) {
+	conn := db.GetPgxConn(ctx, cfg.Dsn)
+
+	preparedQuery, err := GetPrepareQuery(cfg.Query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare query: %v", err)
+	}
+	cfg.Query = preparedQuery.RawSQL
+
+	var runner QueryRunner
+	switch preparedQuery.QueryType {
+	case QueryTypeRead:
+		runner = NewQueryReader(conn, tmpl)
+	case QueryTypeExec:
+		runner = NewQueryExecutor(conn, tmpl)
+	default:
+		return nil, fmt.Errorf("unsupported query type: %s", preparedQuery.QueryType)
+	}
+
+	return &LoadTestExecutor{
+		cfg:       cfg,
+		conn:      conn,
+		tmpl:      tmpl,
+		queryChan: make(chan *stat.QueryStat, 10*cfg.Workers),
+		queryFunc: runner,
+	}, nil
+}
+
+func (e *LoadTestExecutor) startStatsCollector(ctx context.Context, stats *stat.Stat) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go processStat(ctx, &wg, globalStat, queryChan)
 
-	pkg.LogWrapper("Building execution plan...")
-	exec := NewQExecutor(qr, connectionPool, queryChan, tmpl)
-	if qr.Iterations != 0 && qr.Duration == 0 {
-		exec.RunTestByIterations(ctx)
-	}
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
 
-	close(queryChan)
-	wg.Wait()
-	return globalStat
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case q, ok := <-e.queryChan:
+				if !ok {
+					return
+				}
+				stats.SubmitStat(q)
+			}
+		}
+	}(&wg)
+
+	return &wg
 }
 
-func processStat(ctx context.Context, wg *sync.WaitGroup, gs *stat.Stat, queryChan chan *stat.QueryStat) {
-	defer wg.Done()
-	pkg.LogWrapper("Initializing stats submit process")
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("finish stats submit process")
-			return
-		case st, ok := <-queryChan:
-			if !ok {
+func (e *LoadTestExecutor) startWorkers(ctx context.Context) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	startSignal := make(chan struct{})
+	iterations := distributeIterations(e.cfg.Iterations, e.cfg.Workers)
+
+	startWorker := func(wg *sync.WaitGroup, workerID, iterCount int, start chan struct{}) {
+		defer wg.Done()
+		<-start
+		for i := 0; i < iterCount; i++ {
+			if ctx.Err() != nil {
+				log.Printf("[worker id: %d] cancelled", workerID)
 				return
 			}
-			gs.SubmitStat(st)
+
+			start := time.Now()
+			statEntry, err := e.queryFunc.Run(ctx)
+			pacing(start, e.cfg.Pacing)
+			if err != nil {
+				log.Printf("[worker id: %d] query error: %v", workerID, err)
+				return
+			}
+
+			select {
+			case <-ctx.Done():
+				log.Printf("[worker id: %d] get signal from context", workerID)
+				return
+			default:
+				e.queryChan <- statEntry
+			}
 		}
 	}
-}
 
-type QExecutor struct {
-	qr        *QuickRun
-	queryType string
-	connPool  *db.CustomConnPgx
-	queryChan chan *stat.QueryStat
-	tmpl      *template.Template
-}
-
-func NewQExecutor(qr *QuickRun, connPool *db.CustomConnPgx, queryChan chan *stat.QueryStat, tmpl *template.Template) *QExecutor {
-	preparedQuery, err := PrepareQuery(qr.Query)
-	if err != nil {
-		pkg.PrintFatal(fmt.Sprintf("failed to sanitize query: %s", err.Error()), err)
-	}
-
-	qr.Query = preparedQuery.RawSQL
-	return &QExecutor{
-		qr:        qr,
-		queryType: preparedQuery.QueryType,
-		connPool:  connPool,
-		queryChan: queryChan,
-		tmpl:      tmpl,
-	}
-}
-
-func (q *QExecutor) RunTestByIterations(ctx context.Context) {
-	var wg sync.WaitGroup
-	itersPerWorker := getItersPerWorker(q.qr)
-	startSignal := make(chan struct{})
-
-	for i := 0; i < q.qr.Workers; i++ {
+	for i := 0; i < e.cfg.Workers; i++ {
 		wg.Add(1)
+
 		workerID := i
-
-		iters := itersPerWorker[i]
-		go q.runWorker(ctx, workerID, iters, startSignal, &wg)
+		go startWorker(&wg, workerID, iterations[workerID], startSignal)
 	}
-	pkg.LogWrapper("Executing quick test by iterations")
+
 	close(startSignal)
-	wg.Wait()
+	return &wg
 }
 
-func (q *QExecutor) runWorker(ctx context.Context, workerID, iters int, startSignal <-chan struct{}, wg *sync.WaitGroup) {
-	defer wg.Done()
-	<-startSignal
-	for i := 0; i < iters; i++ {
-		if ctx.Err() != nil {
-			log.Printf("worker_id: %d cancelled", workerID)
-			return
-		}
-		queryStat, err := q.execQuery(ctx)
-		time.Sleep(q.qr.Pacing)
-		if err != nil {
-			log.Printf("worker_id: %d query failed: %v\n", workerID, err)
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case q.queryChan <- queryStat:
-		}
-	}
+func (e *LoadTestExecutor) Run(ctx context.Context) *stat.Stat {
+	stats := stat.NewStat()
+	wgStats := e.startStatsCollector(ctx, stats)
+
+	wgWorkers := e.startWorkers(ctx)
+	pkg.LogWrapper("Starting load test by iterations...")
+
+	wgWorkers.Wait()
+	close(e.queryChan)
+
+	wgStats.Wait()
+	return stats
 }
 
-func (q *QExecutor) execQuery(ctx context.Context) (*stat.QueryStat, error) {
-	preparedQuery, err := RenderTemplateQuery(q.tmpl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build statement from template: %v", err)
+func distributeIterations(total, workers int) []int {
+	result := make([]int, workers)
+	for i := 0; i < total; i++ {
+		result[i%workers]++
 	}
-	switch q.queryType {
-	case "query":
-		return q.connPool.QueryRowsWithLatency(ctx, preparedQuery)
-	case "exec":
-		return q.connPool.ExecWithLatency(ctx, preparedQuery)
-	default:
-		return nil, fmt.Errorf("unsupported query type: %s", q.queryType)
-	}
+	return result
 }
 
-func getItersPerWorker(qr *QuickRun) []int {
-	itersPerWorker := make([]int, qr.Workers)
-	for i := 0; i < qr.Iterations; i++ {
-		itersPerWorker[i%qr.Workers]++
+func pacing(start time.Time, pacing time.Duration) {
+	elapsed := time.Since(start)
+	remaining := pacing - elapsed
+	if remaining > 0 {
+		time.Sleep(remaining)
 	}
-	return itersPerWorker
 }
