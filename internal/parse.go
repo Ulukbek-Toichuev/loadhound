@@ -50,13 +50,13 @@ func NewPreparedQuery(sql string, typ string) *PreparedQuery {
 	return &PreparedQuery{RawSQL: sql, QueryType: typ}
 }
 
-// PrepareQuery cleans the query and classifies its type.
-func PrepareQuery(query string) (*PreparedQuery, error) {
+// GetPrepareQuery cleans the query and identify its type.
+func GetPrepareQuery(query string) (*PreparedQuery, error) {
 	clean := removeComments(query)
 	if clean == "" {
 		return nil, NewParseError("query contains only comments", nil)
 	}
-	return classifyQuery(clean), nil
+	return identifyQuery(clean), nil
 }
 
 func removeComments(sql string) string {
@@ -69,7 +69,7 @@ func removeComments(sql string) string {
 	return strings.TrimSpace(sql)
 }
 
-func classifyQuery(sql string) *PreparedQuery {
+func identifyQuery(sql string) *PreparedQuery {
 	upper := strings.ToUpper(sql)
 	switch {
 	case strings.HasPrefix(upper, "INSERT"),
