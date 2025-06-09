@@ -18,6 +18,7 @@ import (
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
+	"github.com/schollz/progressbar/v3"
 )
 
 type QueryRunner interface {
@@ -66,12 +67,24 @@ func (e *LoadTestExecutor) startStatsCollector(ctx context.Context, stats *stat.
 
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
-
+		bar := progressbar.NewOptions(e.cfg.Iterations,
+			progressbar.OptionEnableColorCodes(true),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSetWidth(15),
+			progressbar.OptionSetDescription("Iteration per second..."),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[green]=[reset]",
+				SaucerHead:    "[green]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}))
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case q, ok := <-e.queryChan:
+				bar.Add(1)
 				if !ok {
 					return
 				}

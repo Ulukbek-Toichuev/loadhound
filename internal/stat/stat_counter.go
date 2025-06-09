@@ -17,6 +17,7 @@ import (
 
 func PrintPretty(r *Result) {
 	var result strings.Builder
+	result.WriteString("\n\n")
 	result.WriteString("\nTest summary\n")
 	result.WriteString("──────────────────────────────\n")
 	result.WriteString(fmt.Sprintf("Start Time:       %s\n", r.Start.Format(time.RFC3339)))
