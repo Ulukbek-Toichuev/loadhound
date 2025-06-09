@@ -15,7 +15,6 @@ import (
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -40,42 +39,39 @@ func GetPgxConn(ctx context.Context, url string) *CustomConnPgx {
 	return &CustomConnPgx{pool}
 }
 
-func (c *CustomConnPgx) ExecWithLatency(ctx context.Context, query string) (*stat.QueryStat, error) {
-	start := time.Now()
-	tag, err := c.Exec(ctx, query)
-	latency := time.Since(start)
-
-	if err != nil {
-		return stat.NewQueryStat(latency, err, tag.RowsAffected()), err
-	}
-	return stat.NewQueryStat(latency, err, tag.RowsAffected()), nil
+func (c *CustomConnPgx) ExecWithLatency(ctx context.Context, query string) *stat.QueryStat {
+	return measureLatency(func() (int64, error) {
+		tag, err := c.Exec(ctx, query)
+		if err != nil {
+			return 0, err
+		}
+		return tag.RowsAffected(), nil
+	})
 }
 
-func (c *CustomConnPgx) QueryRowsWithLatency(ctx context.Context, query string) (*stat.QueryStat, error) {
-	var r int64
-	start := time.Now()
-	rows, err := c.Query(ctx, query)
-	latency := time.Since(start)
+func (c *CustomConnPgx) QueryRowsWithLatency(ctx context.Context, query string) *stat.QueryStat {
+	return measureLatency(func() (int64, error) {
+		rows, err := c.Query(ctx, query)
+		if err != nil {
+			return 0, err
+		}
 
-	if err != nil {
-		return stat.NewQueryStat(latency, err, r), err
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		r++
-	}
-	return stat.NewQueryStat(latency, err, r), nil
+		defer rows.Close()
+		var count int64
+		if err := rows.Err(); err != nil {
+			return count, err
+		}
+		for rows.Next() {
+			count++
+		}
+		return count, nil
+	})
 }
 
-func (c *CustomConnPgx) QueryWithLatency(ctx context.Context, query string) (pgconn.CommandTag, time.Duration, error) {
+func measureLatency(f func() (int64, error)) *stat.QueryStat {
 	start := time.Now()
-	rows, err := c.Query(ctx, query)
+	count, err := f()
 	latency := time.Since(start)
 
-	if err != nil {
-		return pgconn.CommandTag{}, latency, err
-	}
-
-	return rows.CommandTag(), latency, nil
+	return stat.NewQueryStat(latency, err, count)
 }
