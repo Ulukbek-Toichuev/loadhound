@@ -60,15 +60,18 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
 		return NewQuickRunErr("failed to get template", err)
 	}
 
-	fmt.Println("pacing: ", qr.Pacing)
+	le, err := NewLoadTestExecutor(ctx, qr, tmpl)
+	if err != nil {
+		return NewQuickRunErr("failed to create load executor instance", err)
+	}
 
 	startTestTime := time.Now()
-	st := ExecuteQuickTest(ctx, qr, tmpl)
+	st := le.Run(ctx)
 	if st != nil {
-		summary := stat.NewSummaryStat(st, startTestTime, time.Now(), qr.Workers, qr.Iterations)
-		stat.PrintSummary(summary)
+		result := stat.GetResult(startTestTime, time.Now(), time.Since(startTestTime), st)
+		stat.PrintPretty(result)
 		if qr.OutputFile != "" {
-			stat.SaveInFile(summary, qr.OutputFile)
+			stat.SaveInFile(result, qr.OutputFile)
 		}
 	}
 	return nil
