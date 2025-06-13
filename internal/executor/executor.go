@@ -86,13 +86,16 @@ func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Templat
 func (e *QuickExecutor) startWorkers(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
 	var wg sync.WaitGroup
 	startSignal := make(chan struct{})
-	iterations := distributeIterations(e.cfg.Iterations, e.cfg.Workers)
+	itersPerWorker := distributeIterations(e.cfg.Iterations, e.cfg.Workers)
 
 	e.cfg.Logger.Info().Msg("init progress bar")
 	pgBar := initProgress(e.cfg.Iterations)
 
 	startWorker := func(wg *sync.WaitGroup, workerID, iterCount int, start chan struct{}, logger *zerolog.Logger) {
 		defer wg.Done()
+		if iterCount == 0 {
+			return
+		}
 		<-start
 		for i := 0; i < iterCount; i++ {
 			if ctx.Err() != nil {
@@ -123,7 +126,7 @@ func (e *QuickExecutor) startWorkers(ctx context.Context) (*sync.WaitGroup, *pro
 		wg.Add(1)
 
 		workerID := i
-		go startWorker(&wg, workerID, iterations[workerID], startSignal, e.cfg.Logger)
+		go startWorker(&wg, workerID, itersPerWorker[workerID], startSignal, e.cfg.Logger)
 	}
 
 	close(startSignal)
