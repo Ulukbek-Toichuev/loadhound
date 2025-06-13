@@ -8,6 +8,7 @@ Licensed under the MIT License.
 package stat
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"sync"
@@ -53,15 +54,15 @@ func (s *Stat) SubmitStat(qr *QueryStat) {
 }
 
 type Result struct {
-	Start          time.Time `json:"start"`
-	End            time.Time `json:"end"`
-	TotalTime      time.Time `json:"total_time"`
-	TotalQueries   int       `json:"total_queries"`
-	SuccessQueries int       `json:"successfull_queries"`
-	FailedQueries  int       `json:"failed_queries"`
-	Throughput     float64   `json:"throuphput"`
-	Latency        *Latency  `json:"latency"`
-	TopErrors      []string  `json:"top_errors"`
+	Start          string   `json:"start"`
+	End            string   `json:"end"`
+	TotalTime      string   `json:"total_time"`
+	TotalQueries   int      `json:"total_queries"`
+	SuccessQueries int      `json:"successfull_queries"`
+	FailedQueries  int      `json:"failed_queries"`
+	Throughput     float64  `json:"throuphput"`
+	Latency        *Latency `json:"latency"`
+	TopErrors      []string `json:"top_errors"`
 }
 
 type Latency struct {
@@ -78,15 +79,18 @@ func NewLatency(min, max, median, p90, p95, p99 int64, avg float64) *Latency {
 	return &Latency{min, max, avg, median, p90, p95, p99}
 }
 
-func GetResult(start, end time.Time, total time.Duration, stat *Stat) *Result {
+func GetResult(start, end time.Time, stat *Stat) *Result {
 	var result Result
-	result.Start = start
-	result.End = end
+
+	totalTime := end.Sub(start)
+	result.Start = start.Format(time.RFC822)
+	result.End = end.Format(time.RFC822)
+	result.TotalTime = formatDuration(totalTime)
 	result.TotalQueries = stat.Total
 	result.SuccessQueries = stat.Success
 	result.FailedQueries = stat.Failed
 	result.Latency = GetLatency(stat.QueriesRespList)
-	result.Throughput = throughput(len(stat.QueriesRespList), total)
+	result.Throughput = throughput(len(stat.QueriesRespList), totalTime)
 	return &result
 }
 
@@ -148,4 +152,24 @@ func percentile(data []int64, p float64) int64 {
 func throughput(numRequests int, totalTime time.Duration) float64 {
 	seconds := totalTime.Seconds()
 	return float64(numRequests) / seconds
+}
+
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = -d
+	}
+
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+	milliseconds := d.Milliseconds()
+
+	if hours > 0 {
+		return fmt.Sprintf("%d h %d m %d s", hours, minutes, seconds)
+	} else if minutes > 0 {
+		return fmt.Sprintf("%d m %d s", minutes, seconds)
+	} else if seconds > 0 {
+		return fmt.Sprintf("%d s %d ms", seconds, milliseconds)
+	}
+	return fmt.Sprintf("%d ms", milliseconds)
 }

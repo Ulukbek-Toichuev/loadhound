@@ -5,7 +5,7 @@ Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 Licensed under the MIT License.
 */
 
-package internal
+package executor
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
+	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 )
 
@@ -26,7 +27,7 @@ func NewQueryReader(conn *db.CustomConnPgx, tmpl *template.Template) *QueryReade
 }
 
 func (q *QueryReader) Run(ctx context.Context) (*stat.QueryStat, error) {
-	query, err := RenderTemplateQuery(q.tmpl)
+	query, err := parse.RenderTemplateQuery(q.tmpl)
 	if err != nil {
 		return nil, fmt.Errorf("template render failed: %v", err)
 	}
@@ -44,7 +45,7 @@ func NewQueryExecutor(conn *db.CustomConnPgx, tmpl *template.Template) *QueryExe
 }
 
 func (q *QueryExecutor) Run(ctx context.Context) (*stat.QueryStat, error) {
-	query, err := RenderTemplateQuery(q.tmpl)
+	query, err := parse.RenderTemplateQuery(q.tmpl)
 	if err != nil {
 		return nil, fmt.Errorf("template render failed: %v", err)
 	}

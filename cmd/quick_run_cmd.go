@@ -10,7 +10,8 @@ package cmd
 import (
 	"time"
 
-	"github.com/Ulukbek-Toichuev/loadhound/internal"
+	"github.com/Ulukbek-Toichuev/loadhound/internal/executor"
+
 	"github.com/spf13/cobra"
 )
 
@@ -23,13 +24,13 @@ const (
 )
 
 func GetQuickRunCmd() *cobra.Command {
-	var qr internal.QuickRun
+	var qr executor.QuickRun
 
 	cmd := &cobra.Command{
 		Use:   "quick-run",
 		Short: "Run a quick one-off load test without YAML config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return internal.QuickRunHandler(cmd.Context(), &qr)
+			return executor.QuickRunHandler(cmd.Context(), &qr)
 		},
 	}
 

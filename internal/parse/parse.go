@@ -5,7 +5,7 @@ Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 Licensed under the MIT License.
 */
 
-package internal
+package parse
 
 import (
 	"regexp"
@@ -51,7 +51,7 @@ func NewPreparedQuery(sql string, typ string) *PreparedQuery {
 }
 
 // GetPrepareQuery cleans the query and identify its type.
-func GetPrepareQuery(query string) (*PreparedQuery, error) {
+func GetPreparedQuery(query string) (*PreparedQuery, error) {
 	clean := removeComments(query)
 	if clean == "" {
 		return nil, NewParseError("query contains only comments", nil)
