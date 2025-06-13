@@ -83,7 +83,56 @@ func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Templat
 	}, nil
 }
 
-func (e *QuickExecutor) startWorkers(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
+func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
+	var wg sync.WaitGroup
+	startSignal := make(chan struct{})
+
+	e.cfg.Logger.Info().Msg("init progress bar")
+	var maxValue int = int(e.cfg.Duration/e.cfg.Pacing) * e.cfg.Workers
+	pgBar := initProgress(maxValue)
+
+	startWorker := func(wg *sync.WaitGroup, workerID int) {
+		defer wg.Done()
+		<-startSignal
+
+		timeout := time.After(e.cfg.Duration)
+
+		for {
+			if ctx.Err() != nil {
+				e.cfg.Logger.Error().Int("worker-id", workerID).Err(ctx.Err()).Msg("context err from worker")
+				return
+			}
+			select {
+			case <-ctx.Done():
+				e.cfg.Logger.Info().Int("worker-id", workerID).Msg("getting 'Done' signal from the context")
+				return
+			case <-timeout:
+				return
+			default:
+				start := time.Now()
+				queryStat, err := e.queryFunc.Run(ctx)
+				if err != nil {
+					e.cfg.Logger.Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
+					continue
+				}
+				e.queryChan <- queryStat
+				pgBar.Add(1)
+				pacing(start, e.cfg.Pacing)
+			}
+		}
+	}
+
+	for i := 0; i < e.cfg.Workers; i++ {
+		wg.Add(1)
+		workerID := i
+		go startWorker(&wg, workerID)
+	}
+
+	close(startSignal)
+	return &wg, pgBar
+}
+
+func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
 	var wg sync.WaitGroup
 	startSignal := make(chan struct{})
 	itersPerWorker := distributeIterations(e.cfg.Iterations, e.cfg.Workers)
@@ -124,7 +173,6 @@ func (e *QuickExecutor) startWorkers(ctx context.Context) (*sync.WaitGroup, *pro
 
 	for i := 0; i < e.cfg.Workers; i++ {
 		wg.Add(1)
-
 		workerID := i
 		go startWorker(&wg, workerID, itersPerWorker[workerID], startSignal, e.cfg.Logger)
 	}
@@ -136,10 +184,7 @@ func (e *QuickExecutor) startWorkers(ctx context.Context) (*sync.WaitGroup, *pro
 func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
 	stats := stat.NewStat()
 	wgStats := startStatsCollector(ctx, stats, e.queryChan)
-
-	wgWorkers, pgBar := e.startWorkers(ctx)
-	e.cfg.Logger.Info().Msg("starting the test based on iterations")
-
+	wgWorkers, pgBar := e.start(ctx)
 	wgWorkers.Wait()
 	close(e.queryChan)
 
@@ -147,6 +192,20 @@ func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
 	pgBar.Finish()
 	fmt.Printf("\n")
 	return stats
+}
+
+func (e *QuickExecutor) start(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
+	if e.cfg.Iterations > 0 {
+		e.cfg.Logger.Info().Msg("starting the test based on iterations")
+		wg, pgBar := e.startWorkersOnIters(ctx)
+		return wg, pgBar
+	} else if e.cfg.Duration > 0 {
+		e.cfg.Logger.Info().Msg("starting the test based on duration")
+		wg, pgBar := e.startWorkersOnDur(ctx)
+		return wg, pgBar
+	}
+
+	return nil, nil
 }
 
 func distributeIterations(total, workers int) []int {
