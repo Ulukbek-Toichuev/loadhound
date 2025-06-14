@@ -63,7 +63,7 @@ func TestValidateQuickRunFields(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateQuickRunFields(tc.qr)
+			err := ValidateQuickRunFields(tc.qr)
 			if tc.expectErrMsg != "" {
 				var perr *QuickRunError
 				assert.ErrorAs(t, err, &perr)

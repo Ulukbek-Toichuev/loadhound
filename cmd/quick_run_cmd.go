@@ -8,9 +8,12 @@ Licensed under the MIT License.
 package cmd
 
 import (
+	"context"
 	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/executor"
+	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
+	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 
 	"github.com/spf13/cobra"
 )
@@ -30,7 +33,7 @@ func GetQuickRunCmd() *cobra.Command {
 		Use:   "quick-run",
 		Short: "Run a quick one-off load test without YAML config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executor.QuickRunHandler(cmd.Context(), &qr)
+			return GetQuickRunHandler(cmd.Context(), &qr)
 		},
 	}
 
@@ -43,4 +46,33 @@ func GetQuickRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&qr.OutputFile, "output-file", default_output_file, "File to write test results to")
 
 	return cmd
+}
+
+func GetQuickRunHandler(ctx context.Context, qr *executor.QuickRun) error {
+	qr.Logger = pkg.GetLogger()
+	qr.Logger.Info().Msg("validating quick-run parameters")
+	err := executor.ValidateQuickRunFields(qr)
+	if err != nil {
+		errMsg := "failed to validate parameters"
+		qr.Logger.Err(err).Msg(errMsg)
+		return executor.NewQuickRunError(errMsg, err)
+	}
+
+	qr.Logger.Info().Msg("parsing query template")
+	tmpl, err := parse.ParseQueryTemplate(qr.Query)
+	if err != nil {
+		errMsg := "failed to get template"
+		qr.Logger.Err(err).Msg(errMsg)
+		return executor.NewQuickRunError(errMsg, err)
+	}
+
+	qr.Logger.Info().Msg("getting executor instance")
+	le, err := executor.NewQuickExecutor(ctx, qr, tmpl)
+	if err != nil {
+		errMsg := "failed to create executor instance"
+		qr.Logger.Err(err).Msg(errMsg)
+		return executor.NewQuickRunError(errMsg, err)
+	}
+
+	return executor.QuickRunHandler(ctx, qr, le)
 }

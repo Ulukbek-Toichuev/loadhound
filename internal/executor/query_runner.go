@@ -9,13 +9,33 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"text/template"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 )
+
+type Performer interface {
+	Perform(ctx context.Context) (*stat.QueryStat, error)
+}
+
+type PerformerError struct {
+	Message string
+	Err     error
+}
+
+func NewPerformerError(msg string, err error) *PerformerError {
+	return &PerformerError{msg, err}
+}
+
+func (e *PerformerError) Error() string {
+	return e.Message
+}
+
+func (e *PerformerError) Unwrap() error {
+	return e.Err
+}
 
 type QueryReader struct {
 	conn *db.CustomConnPgx
@@ -26,10 +46,10 @@ func NewQueryReader(conn *db.CustomConnPgx, tmpl *template.Template) *QueryReade
 	return &QueryReader{conn: conn, tmpl: tmpl}
 }
 
-func (q *QueryReader) Run(ctx context.Context) (*stat.QueryStat, error) {
+func (q *QueryReader) Perform(ctx context.Context) (*stat.QueryStat, error) {
 	query, err := parse.RenderTemplateQuery(q.tmpl)
 	if err != nil {
-		return nil, fmt.Errorf("template render failed: %v", err)
+		return nil, NewPerformerError("failed render template", err)
 	}
 
 	return q.conn.QueryRowsWithLatency(ctx, query), nil
@@ -44,10 +64,10 @@ func NewQueryExecutor(conn *db.CustomConnPgx, tmpl *template.Template) *QueryExe
 	return &QueryExecutor{conn: conn, tmpl: tmpl}
 }
 
-func (q *QueryExecutor) Run(ctx context.Context) (*stat.QueryStat, error) {
+func (q *QueryExecutor) Perform(ctx context.Context) (*stat.QueryStat, error) {
 	query, err := parse.RenderTemplateQuery(q.tmpl)
 	if err != nil {
-		return nil, fmt.Errorf("template render failed: %v", err)
+		return nil, NewPerformerError("failed render template", err)
 	}
 
 	return q.conn.ExecWithLatency(ctx, query), nil

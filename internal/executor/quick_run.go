@@ -11,9 +11,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
-	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 
 	"github.com/rs/zerolog"
 )
@@ -50,34 +48,9 @@ func NewQuickRun(dsn, query string, workers, iterations int, duration, pacing ti
 	return &QuickRun{dsn, query, workers, iterations, duration, pacing, outputFile, logger}
 }
 
-func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
-	qr.Logger = pkg.GetLogger()
-	qr.Logger.Info().Msg("validating quick-run parameters")
-	err := validateQuickRunFields(qr)
-	if err != nil {
-		errMsg := "failed to validate parameters"
-		qr.Logger.Err(err).Msg(errMsg)
-		return NewQuickRunError(errMsg, err)
-	}
-
-	qr.Logger.Info().Msg("parsing query template")
-	tmpl, err := parse.ParseQueryTemplate(qr.Query)
-	if err != nil {
-		errMsg := "failed to get template"
-		qr.Logger.Err(err).Msg(errMsg)
-		return NewQuickRunError(errMsg, err)
-	}
-
-	qr.Logger.Info().Msg("getting executor instance")
-	le, err := NewQuickExecutor(ctx, qr, tmpl)
-	if err != nil {
-		errMsg := "failed to create executor instance"
-		qr.Logger.Err(err).Msg(errMsg)
-		return NewQuickRunError(errMsg, err)
-	}
-
+func QuickRunHandler(ctx context.Context, qr *QuickRun, exec Executor) error {
 	startTestTime := time.Now()
-	st := le.Run(ctx)
+	st := exec.Run(ctx)
 	if st == nil {
 		errMsg := "unexpected situation, stat pointer is null"
 		qr.Logger.Error().Msg(errMsg)
@@ -92,7 +65,7 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun) error {
 	return nil
 }
 
-func validateQuickRunFields(qr *QuickRun) error {
+func ValidateQuickRunFields(qr *QuickRun) error {
 	if qr.Dsn == "" {
 		return NewQuickRunError("--dsn is required", nil)
 	}

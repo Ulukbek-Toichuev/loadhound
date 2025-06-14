@@ -23,24 +23,7 @@ import (
 )
 
 type Executor interface {
-	Run(ctx context.Context) (*stat.QueryStat, error)
-}
-
-type ExecutorError struct {
-	Message string
-	Err     error
-}
-
-func NewExecutorError(msg string, err error) *ExecutorError {
-	return &ExecutorError{msg, err}
-}
-
-func (e *ExecutorError) Error() string {
-	return e.Message
-}
-
-func (e *ExecutorError) Unwrap() error {
-	return e.Err
+	Run(ctx context.Context) *stat.Stat
 }
 
 type QuickExecutor struct {
@@ -48,7 +31,7 @@ type QuickExecutor struct {
 	conn      *db.CustomConnPgx
 	tmpl      *template.Template
 	queryChan chan *stat.QueryStat
-	queryFunc Executor
+	queryFunc Performer
 }
 
 func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Template) (*QuickExecutor, error) {
@@ -58,20 +41,20 @@ func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Templat
 	if err != nil {
 		errMsg := "failed to get prepared query"
 		cfg.Logger.Err(err).Msg(errMsg)
-		return nil, NewExecutorError(errMsg, err)
+		return nil, NewPerformerError(errMsg, err)
 	}
 	cfg.Query = preparedQuery.RawSQL
 
-	var runner Executor
+	var p Performer
 	switch preparedQuery.QueryType {
 	case parse.QueryTypeRead:
-		runner = NewQueryReader(conn, tmpl)
+		p = NewQueryReader(conn, tmpl)
 	case parse.QueryTypeExec:
-		runner = NewQueryExecutor(conn, tmpl)
+		p = NewQueryExecutor(conn, tmpl)
 	default:
 		errMsg := fmt.Sprintf("unsupported query type: %s", preparedQuery.QueryType)
 		cfg.Logger.Error().Msg(errMsg)
-		return nil, NewExecutorError(errMsg, nil)
+		return nil, NewPerformerError(errMsg, nil)
 	}
 
 	return &QuickExecutor{
@@ -79,7 +62,7 @@ func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Templat
 		conn:      conn,
 		tmpl:      tmpl,
 		queryChan: make(chan *stat.QueryStat, 10*cfg.Workers),
-		queryFunc: runner,
+		queryFunc: p,
 	}, nil
 }
 
@@ -110,7 +93,7 @@ func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) (*sync.WaitGroup,
 				return
 			default:
 				start := time.Now()
-				queryStat, err := e.queryFunc.Run(ctx)
+				queryStat, err := e.queryFunc.Perform(ctx)
 				if err != nil {
 					e.cfg.Logger.Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
 					continue
@@ -153,7 +136,7 @@ func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) (*sync.WaitGrou
 			}
 
 			start := time.Now()
-			queryStat, err := e.queryFunc.Run(ctx)
+			queryStat, err := e.queryFunc.Perform(ctx)
 			if err != nil {
 				logger.Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
 				continue
