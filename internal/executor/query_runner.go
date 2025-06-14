@@ -9,16 +9,13 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"text/template"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 )
-
-type Performer interface {
-	Perform(ctx context.Context) (*stat.QueryStat, error)
-}
 
 type PerformerError struct {
 	Message string
@@ -30,6 +27,9 @@ func NewPerformerError(msg string, err error) *PerformerError {
 }
 
 func (e *PerformerError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Err)
+	}
 	return e.Message
 }
 
@@ -37,38 +37,44 @@ func (e *PerformerError) Unwrap() error {
 	return e.Err
 }
 
-type QueryReader struct {
-	conn *db.CustomConnPgx
-	tmpl *template.Template
+type Performer interface {
+	Perform(ctx context.Context) (*stat.QueryStat, error)
 }
 
-func NewQueryReader(conn *db.CustomConnPgx, tmpl *template.Template) *QueryReader {
-	return &QueryReader{conn: conn, tmpl: tmpl}
+type basePerformer struct {
+	conn     *db.CustomConnPgx
+	tmpl     *template.Template
+	execFunc func(context.Context, *db.CustomConnPgx, string) *stat.QueryStat
 }
 
-func (q *QueryReader) Perform(ctx context.Context) (*stat.QueryStat, error) {
-	query, err := parse.RenderTemplateQuery(q.tmpl)
+func (p *basePerformer) Perform(ctx context.Context) (*stat.QueryStat, error) {
+	query, err := parse.RenderTemplateQuery(p.tmpl)
 	if err != nil {
-		return nil, NewPerformerError("failed render template", err)
+		return nil, NewPerformerError("failed to render template", err)
 	}
-
-	return q.conn.QueryRowsWithLatency(ctx, query), nil
+	return p.execFunc(ctx, p.conn, query), nil
 }
 
-type QueryExecutor struct {
-	conn *db.CustomConnPgx
-	tmpl *template.Template
-}
-
-func NewQueryExecutor(conn *db.CustomConnPgx, tmpl *template.Template) *QueryExecutor {
-	return &QueryExecutor{conn: conn, tmpl: tmpl}
-}
-
-func (q *QueryExecutor) Perform(ctx context.Context) (*stat.QueryStat, error) {
-	query, err := parse.RenderTemplateQuery(q.tmpl)
-	if err != nil {
-		return nil, NewPerformerError("failed render template", err)
+func NewQueryReader(conn *db.CustomConnPgx, tmpl *template.Template) Performer {
+	return &basePerformer{
+		conn: conn,
+		tmpl: tmpl,
+		execFunc: func(ctx context.Context, conn *db.CustomConnPgx, query string) *stat.QueryStat {
+			return conn.QueryRowsWithLatency(ctx, query)
+		},
 	}
+}
 
-	return q.conn.ExecWithLatency(ctx, query), nil
+func NewQueryExecutor(conn *db.CustomConnPgx, tmpl *template.Template) Performer {
+	return &basePerformer{
+		conn: conn,
+		tmpl: tmpl,
+		execFunc: func(ctx context.Context, conn *db.CustomConnPgx, query string) *stat.QueryStat {
+			return conn.ExecWithLatency(ctx, query)
+		},
+	}
+}
+
+func NewPreparedStatementExecutor(conn *db.CustomConnPgx, tmpl *template.Template) Performer {
+	return &basePerformer{}
 }
