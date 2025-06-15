@@ -13,7 +13,6 @@ import (
 	"text/template"
 
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
-	"github.com/google/uuid"
 )
 
 const (
@@ -101,7 +100,7 @@ func RenderTemplateQuery(t *template.Template) (string, error) {
 	data := struct {
 		RandIntRange       func(min, max int) int
 		RandFloat64InRange func(min, max float64) float64
-		RandUUID           func() *uuid.UUID
+		RandUUID           func() string
 		RandStringInRange  func(min, max int) string
 		GetTime            func() string
 	}{

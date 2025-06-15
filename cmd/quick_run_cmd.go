@@ -9,6 +9,7 @@ package cmd
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/executor"
@@ -38,6 +39,7 @@ func GetQuickRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&qr.Dsn, "dsn", "", "PostgreSQL DSN connection string (required)")
+	cmd.Flags().StringVar(&qr.PathToSQLFile, "sql-file", "", "Path to your sql file")
 	cmd.Flags().StringVar(&qr.Query, "query", "", "SQL query to run (required)")
 	cmd.Flags().IntVar(&qr.Workers, "workers", default_workers, "Number of concurrent workers")
 	cmd.Flags().IntVar(&qr.Iterations, "iter", default_iteration, "Number of iterations (mutually exclusive with --duration)")
@@ -58,6 +60,14 @@ func GetQuickRunHandler(ctx context.Context, qr *executor.QuickRun) error {
 		return executor.NewQuickRunError(errMsg, err)
 	}
 
+	if qr.PathToSQLFile != "" {
+		query, err := getSQLFromFile(qr.PathToSQLFile)
+		if err != nil {
+			return err
+		}
+
+		qr.Query = query
+	}
 	qr.Logger.Info().Msg("parsing query template")
 	tmpl, err := parse.ParseQueryTemplate(qr.Query)
 	if err != nil {
@@ -75,4 +85,13 @@ func GetQuickRunHandler(ctx context.Context, qr *executor.QuickRun) error {
 	}
 
 	return executor.QuickRunHandler(ctx, qr, le)
+}
+
+func getSQLFromFile(pathToFile string) (string, error) {
+	data, err := os.ReadFile(pathToFile)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
 }

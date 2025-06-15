@@ -36,7 +36,6 @@ type QuickExecutor struct {
 
 func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Template) (*QuickExecutor, error) {
 	conn := db.GetPgxConn(ctx, cfg.Dsn)
-
 	preparedQuery, err := parse.GetPreparedQuery(cfg.Query)
 	if err != nil {
 		errMsg := "failed to get prepared query"
@@ -66,23 +65,19 @@ func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Templat
 	}, nil
 }
 
-func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
+func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	startSignal := make(chan struct{})
 
 	e.cfg.Logger.Info().Msg("init progress bar")
-	var maxValue int = int(e.cfg.Duration/e.cfg.Pacing) * e.cfg.Workers
-	pgBar := initProgress(maxValue)
+	pgChan := initProgressBar(ctx, e.cfg)
 
 	startWorker := func(wg *sync.WaitGroup, workerID int) {
 		defer wg.Done()
 		<-startSignal
-
 		timeout := time.After(e.cfg.Duration)
-
 		for {
 			if ctx.Err() != nil {
-				e.cfg.Logger.Error().Int("worker-id", workerID).Err(ctx.Err()).Msg("context err from worker")
 				return
 			}
 			select {
@@ -99,7 +94,9 @@ func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) (*sync.WaitGroup,
 					continue
 				}
 				e.queryChan <- queryStat
-				pgBar.Add(1)
+				if pgChan != nil {
+					pgChan <- struct{}{}
+				}
 				pacing(start, e.cfg.Pacing)
 			}
 		}
@@ -112,16 +109,16 @@ func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) (*sync.WaitGroup,
 	}
 
 	close(startSignal)
-	return &wg, pgBar
+	return &wg
 }
 
-func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
+func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	startSignal := make(chan struct{})
 	itersPerWorker := distributeIterations(e.cfg.Iterations, e.cfg.Workers)
 
 	e.cfg.Logger.Info().Msg("init progress bar")
-	pgBar := initProgress(e.cfg.Iterations)
+	pgChan := initProgressBar(ctx, e.cfg)
 
 	startWorker := func(wg *sync.WaitGroup, workerID, iterCount int, start chan struct{}, logger *zerolog.Logger) {
 		defer wg.Done()
@@ -148,7 +145,9 @@ func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) (*sync.WaitGrou
 				return
 			default:
 				e.queryChan <- queryStat
-				pgBar.Add(1)
+				if pgChan != nil {
+					pgChan <- struct{}{}
+				}
 			}
 			pacing(start, e.cfg.Pacing)
 		}
@@ -161,34 +160,33 @@ func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) (*sync.WaitGrou
 	}
 
 	close(startSignal)
-	return &wg, pgBar
+	return &wg
 }
 
 func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
 	stats := stat.NewStat()
 	wgStats := startStatsCollector(ctx, stats, e.queryChan)
-	wgWorkers, pgBar := e.start(ctx)
+	wgWorkers := e.start(ctx)
 	wgWorkers.Wait()
 	close(e.queryChan)
 
 	wgStats.Wait()
-	pgBar.Finish()
 	fmt.Printf("\n")
 	return stats
 }
 
-func (e *QuickExecutor) start(ctx context.Context) (*sync.WaitGroup, *progressbar.ProgressBar) {
+func (e *QuickExecutor) start(ctx context.Context) *sync.WaitGroup {
 	if e.cfg.Iterations > 0 {
 		e.cfg.Logger.Info().Msg("starting the test based on iterations")
-		wg, pgBar := e.startWorkersOnIters(ctx)
-		return wg, pgBar
+		wg := e.startWorkersOnIters(ctx)
+		return wg
 	} else if e.cfg.Duration > 0 {
 		e.cfg.Logger.Info().Msg("starting the test based on duration")
-		wg, pgBar := e.startWorkersOnDur(ctx)
-		return wg, pgBar
+		wg := e.startWorkersOnDur(ctx)
+		return wg
 	}
 
-	return nil, nil
+	return nil
 }
 
 func distributeIterations(total, workers int) []int {
@@ -214,6 +212,9 @@ func startStatsCollector(ctx context.Context, stats *stat.Stat, queryChan chan *
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		for {
+			if ctx.Err() != nil {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -229,10 +230,34 @@ func startStatsCollector(ctx context.Context, stats *stat.Stat, queryChan chan *
 	return &wg
 }
 
-func initProgress(maxValue int) *progressbar.ProgressBar {
+func initProgressBar(ctx context.Context, cfg *QuickRun) chan struct{} {
+	// 	/*
+	// 		dur = 1 min
+	// 		pacing = 100 ms
+	// 		workers = 2
+	// 		600 = 60000 (1 min) / 100
+	// 		1200 = 600 * 2
+
+	// 		max value = 1200
+	// 	*/
+	var maxValue int
+	var isBasedOnPacing bool
+	if cfg.Pacing != 0 {
+		maxValue = int(cfg.Duration/cfg.Pacing) * cfg.Workers
+		isBasedOnPacing = true
+	} else {
+		if cfg.Duration != 0 {
+			maxValue = int(cfg.Duration / (10 * time.Millisecond))
+		} else {
+			maxValue = cfg.Iterations
+		}
+	}
+
+	fmt.Println("max value ", maxValue)
 	bar := progressbar.NewOptions(maxValue,
 		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowIts(),
+		progressbar.OptionSetPredictTime(false),
+		progressbar.OptionShowCount(),
 		progressbar.OptionSetWidth(15),
 		progressbar.OptionSetDescription("Running..."),
 		progressbar.OptionSetTheme(progressbar.Theme{
@@ -242,6 +267,36 @@ func initProgress(maxValue int) *progressbar.ProgressBar {
 			BarStart:      "[",
 			BarEnd:        "]",
 		}))
-
-	return bar
+	if isBasedOnPacing {
+		pgChan := make(chan struct{}, maxValue)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case _, ok := <-pgChan:
+					if !ok {
+						break
+					}
+					bar.Add(1)
+				}
+			}
+		}()
+		return pgChan
+	} else {
+		go func() {
+			fmt.Println("starting goroutine that get signal from ticker")
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					bar.Add(1)
+				}
+			}
+		}()
+		return nil
+	}
 }

@@ -9,6 +9,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
@@ -34,18 +35,19 @@ func (q *QuickRunError) Unwrap() error {
 }
 
 type QuickRun struct {
-	Dsn        string
-	Query      string
-	Workers    int
-	Iterations int
-	Duration   time.Duration
-	Pacing     time.Duration
-	OutputFile string
-	Logger     *zerolog.Logger
+	Dsn           string
+	PathToSQLFile string
+	Query         string
+	Workers       int
+	Iterations    int
+	Duration      time.Duration
+	Pacing        time.Duration
+	OutputFile    string
+	Logger        *zerolog.Logger
 }
 
-func NewQuickRun(dsn, query string, workers, iterations int, duration, pacing time.Duration, outputFile string, logger *zerolog.Logger) *QuickRun {
-	return &QuickRun{dsn, query, workers, iterations, duration, pacing, outputFile, logger}
+func NewQuickRun(dsn, pathToSQLFile, query string, workers, iterations int, duration, pacing time.Duration, outputFile string, logger *zerolog.Logger) *QuickRun {
+	return &QuickRun{dsn, pathToSQLFile, query, workers, iterations, duration, pacing, outputFile, logger}
 }
 
 func QuickRunHandler(ctx context.Context, qr *QuickRun, exec Executor) error {
@@ -70,10 +72,6 @@ func ValidateQuickRunFields(qr *QuickRun) error {
 		return NewQuickRunError("--dsn is required", nil)
 	}
 
-	if qr.Query == "" {
-		return NewQuickRunError("--query is required", nil)
-	}
-
 	if qr.Workers < 0 {
 		return NewQuickRunError("--workers must be >= 0", nil)
 	}
@@ -95,6 +93,18 @@ func ValidateQuickRunFields(qr *QuickRun) error {
 
 	if iterations > 0 && duration > 0 {
 		return NewQuickRunError("--iter and --duration are mutually exclusive", nil)
+	}
+
+	if qr.Query != "" && qr.PathToSQLFile != "" {
+		return NewQuickRunError("--query and --sql-file are mutually exclusive", nil)
+	}
+
+	if qr.Query == "" && qr.PathToSQLFile == "" {
+		return NewQuickRunError("either --query or --sql-file must be set", nil)
+	}
+
+	if !strings.HasSuffix(qr.PathToSQLFile, ".sql") {
+		return NewQuickRunError("file is not a .sql file", nil)
 	}
 
 	if qr.Pacing < 0 {

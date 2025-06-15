@@ -34,12 +34,12 @@ func RandFloat64InRange(min, max float64) float64 {
 	return rand.Float64()*(max-min) + min
 }
 
-func RandUUID() *uuid.UUID {
+func RandUUID() string {
 	u, err := uuid.NewRandom()
 	if err != nil {
-		return &uuid.Nil
+		return ""
 	}
-	return &u
+	return fmt.Sprintf("'%s'", u.String())
 }
 
 func RandStringInRange(min, max int) string {
@@ -51,11 +51,12 @@ func RandStringInRange(min, max int) string {
 	for i := range b {
 		b[i] = letters[rand.IntN(len(letters))]
 	}
-	return string(b)
+	return fmt.Sprintf("'%s'", string(b))
 }
 
 func GetTime() string {
-	return time.Now().Format("2006-01-02 15:04:05.999999")
+	t := time.Now().Format("2006-01-02 15:04:05.999999")
+	return fmt.Sprintf("'%s'", t)
 }
 
 func LogWrapper(msg string) {
