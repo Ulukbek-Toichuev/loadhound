@@ -9,6 +9,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -59,6 +60,8 @@ func QuickRunHandler(ctx context.Context, qr *QuickRun, exec Executor) error {
 		return NewQuickRunError(errMsg, nil)
 	}
 	result := stat.GetResult(startTestTime, time.Now(), st)
+
+	fmt.Printf("\n")
 	qr.Logger.Info().Msg("finished the test!")
 	stat.PrintResultPretty(result)
 	if qr.OutputFile != "" {

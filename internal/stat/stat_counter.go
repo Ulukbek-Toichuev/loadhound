@@ -33,7 +33,7 @@ func PrintResultPretty(r *Result) {
 }
 
 func formatHeader() string {
-	return "\n\n\nTest summary\n──────────────────────────────\n"
+	return "\n\nTest summary\n──────────────────────────────\n"
 }
 
 func formatMeta(r *Result) string {
