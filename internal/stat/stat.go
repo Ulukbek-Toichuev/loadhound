@@ -22,11 +22,12 @@ type QueryStat struct {
 }
 
 func NewQueryStat(latency time.Duration, err error, affectedRows int64) *QueryStat {
-	return &QueryStat{latency, err, affectedRows}
+	return &QueryStat{Latency: latency, Err: err, AffectedRows: affectedRows}
 }
 
 type Stat struct {
 	mu              sync.Mutex
+	Query           string
 	Success         int
 	Failed          int
 	Total           int
@@ -35,7 +36,10 @@ type Stat struct {
 }
 
 func NewStat() *Stat {
-	return &Stat{mu: sync.Mutex{}, QueriesRespList: make([]int64, 0), ErrMap: make(map[string]int)}
+	return &Stat{
+		QueriesRespList: make([]int64, 0),
+		ErrMap:          make(map[string]int),
+	}
 }
 
 func (s *Stat) SubmitStat(qr *QueryStat) {
@@ -57,12 +61,13 @@ type Result struct {
 	Start          string   `json:"start"`
 	End            string   `json:"end"`
 	TotalTime      string   `json:"total_time"`
+	Query          string   `json:"query"`
 	TotalQueries   int      `json:"total_queries"`
-	SuccessQueries int      `json:"successfull_queries"`
+	SuccessQueries int      `json:"successful_queries"`
 	FailedQueries  int      `json:"failed_queries"`
-	Throughput     float64  `json:"throuphput"`
+	Throughput     float64  `json:"throughput"`
 	Latency        *Latency `json:"latency"`
-	TopErrors      []string `json:"top_errors"`
+	TopErrors      []string `json:"top_errors,omitempty"`
 }
 
 type Latency struct {
@@ -86,6 +91,7 @@ func GetResult(start, end time.Time, stat *Stat) *Result {
 	result.Start = start.Format(time.RFC822)
 	result.End = end.Format(time.RFC822)
 	result.TotalTime = formatDuration(totalTime)
+	result.Query = stat.Query
 	result.TotalQueries = stat.Total
 	result.SuccessQueries = stat.Success
 	result.FailedQueries = stat.Failed
@@ -122,7 +128,7 @@ func average(data []int64) float64 {
 	for _, d := range data {
 		sum += d
 	}
-	return float64(sum / int64(len(data)))
+	return float64(sum) / float64(len(data))
 }
 
 func median(data []int64) int64 {
@@ -132,7 +138,7 @@ func median(data []int64) int64 {
 	} else {
 		md1 := data[n/2-1]
 		md2 := data[n/2]
-		md := (md1 + md2) / 2.0
+		md := (md1 + md2) / 2
 		return md
 	}
 }
@@ -161,15 +167,16 @@ func formatDuration(d time.Duration) string {
 
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
+	msTotal := d.Milliseconds()
 	seconds := int(d.Seconds()) % 60
-	milliseconds := d.Milliseconds()
+	msRemainder := int(msTotal % 1000)
 
 	if hours > 0 {
-		return fmt.Sprintf("%d h %d m %d s", hours, minutes, seconds)
+		return fmt.Sprintf("%dh:%dm:%d:s", hours, minutes, seconds)
 	} else if minutes > 0 {
-		return fmt.Sprintf("%d m %d s", minutes, seconds)
+		return fmt.Sprintf("%dm:%ds", minutes, seconds)
 	} else if seconds > 0 {
-		return fmt.Sprintf("%d s %d ms", seconds, milliseconds)
+		return fmt.Sprintf("%ds:%dms", seconds, msRemainder)
 	}
-	return fmt.Sprintf("%d ms", milliseconds)
+	return fmt.Sprintf("%dms", msRemainder)
 }

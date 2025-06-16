@@ -182,6 +182,7 @@ func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
 	}()
 
 	wgStats.Wait()
+	stats.Query = e.cfg.Query
 	return stats
 }
 
