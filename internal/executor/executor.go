@@ -15,66 +15,82 @@ import (
 	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal/db"
+	"github.com/Ulukbek-Toichuev/loadhound/internal/model"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
+	"github.com/Ulukbek-Toichuev/loadhound/internal/perform"
 	progress "github.com/Ulukbek-Toichuev/loadhound/internal/progressbar"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 
 	"github.com/rs/zerolog"
 )
 
-type Executor interface {
-	Run(ctx context.Context) *stat.Stat
-}
+const queryChanLen int = 10
 
 type QuickExecutor struct {
-	cfg       *QuickRun
-	conn      *db.CustomConnPgx
-	tmpl      *template.Template
+	cfg       *model.QuickRun
 	queryChan chan *stat.QueryStat
-	queryFunc Performer
 	pgBar     progress.ProgressReporter
+	p         perform.Performer
 }
 
-func NewQuickExecutor(ctx context.Context, cfg *QuickRun, tmpl *template.Template) (*QuickExecutor, error) {
-	conn := db.GetPgxConn(ctx, cfg.Dsn)
-	preparedQuery, err := parse.GetPreparedQuery(cfg.Query)
-	if err != nil {
-		errMsg := "failed to get prepared query"
-		cfg.Logger.Err(err).Msg(errMsg)
-		return nil, NewPerformerError(errMsg, err)
-	}
-	cfg.Query = preparedQuery.RawSQL
-
-	var p Performer
-	switch preparedQuery.QueryType {
-	case parse.QueryTypeRead:
-		p = NewQueryReader(conn, tmpl)
-	case parse.QueryTypeExec:
-		p = NewQueryExecutor(conn, tmpl)
-	default:
-		errMsg := fmt.Sprintf("unsupported query type: %s", preparedQuery.QueryType)
-		cfg.Logger.Error().Msg(errMsg)
-		return nil, NewPerformerError(errMsg, nil)
-	}
-	barCfg := progress.BarConfig{MaxValue: getProgressBarMaxValue(cfg), EnableBar: true, Logger: cfg.Logger}
-	pgBar, err := progress.NewProgressBarWrapper(barCfg)
-	if err != nil {
-		errMsg := "failed to get progress bar instance"
-		cfg.Logger.Err(err).Msg(errMsg)
-		return nil, NewPerformerError(errMsg, err)
-	}
+func NewQuickExecutor(cfg *model.QuickRun, performer perform.Performer, reporter progress.ProgressReporter) *QuickExecutor {
 	return &QuickExecutor{
 		cfg:       cfg,
-		conn:      conn,
-		tmpl:      tmpl,
-		queryChan: make(chan *stat.QueryStat, 10*cfg.Workers),
-		queryFunc: p,
-		pgBar:     pgBar,
-	}, nil
+		queryChan: make(chan *stat.QueryStat, queryChanLen*cfg.Workers),
+		p:         performer,
+		pgBar:     reporter,
+	}
 }
 
-func (e *QuickExecutor) Log() *zerolog.Logger {
-	return e.cfg.Logger
+func BuildQuickExecutor(ctx context.Context, cfg *model.QuickRun, tmpl *template.Template) (*QuickExecutor, error) {
+	conn, err := getSQLDBInstance(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	preparedQuery, err := getPreparedQuery(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	performer, err := getPerformer(preparedQuery.QueryType, conn, tmpl)
+	if err != nil {
+		return nil, err
+	}
+
+	pgBar, err := getProgressBar(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewQuickExecutor(cfg, performer, pgBar), nil
+}
+
+func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
+	if e.pgBar == nil {
+		e.cfg.Logger.Error().Msg("failed to start progress bar")
+		return nil
+	}
+	e.pgBar.Start(ctx)
+	defer e.pgBar.Stop()
+
+	stats := stat.NewStat()
+	wgStats := startStatsCollector(ctx, stats, e.queryChan)
+
+	wgWorkers := e.start(ctx)
+	if wgWorkers == nil {
+		e.log().Error().Msg("failed to start test")
+		close(e.queryChan)
+		return stats
+	}
+
+	go func() {
+		wgWorkers.Wait()
+		close(e.queryChan)
+	}()
+
+	wgStats.Wait()
+	stats.Query = e.cfg.Query
+	return stats
 }
 
 func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) *sync.WaitGroup {
@@ -87,24 +103,24 @@ func (e *QuickExecutor) startWorkersOnDur(ctx context.Context) *sync.WaitGroup {
 		timeout := time.After(e.cfg.Duration)
 		for {
 			if ctx.Err() != nil {
+				e.log().Error().Int("worker-id", workerID).Err(ctx.Err()).Msg("context err from worker")
 				return
 			}
 			select {
 			case <-ctx.Done():
-				e.Log().Info().Int("worker-id", workerID).Msg("getting 'Done' signal from the context")
+				e.log().Info().Int("worker-id", workerID).Msg("getting 'Done' signal from the context")
 				return
 			case <-timeout:
 				return
 			default:
 				start := time.Now()
-				queryStat, err := e.queryFunc.Perform(ctx)
+				queryStat, err := e.p.Perform(ctx)
 				if err != nil {
-					e.Log().Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
-					continue
+					e.log().Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
 				}
 				e.queryChan <- queryStat
-				e.pgBar.Increment()
 				pacing(start, e.cfg.Pacing)
+				e.pgBar.Increment()
 			}
 		}
 	}
@@ -124,80 +140,101 @@ func (e *QuickExecutor) startWorkersOnIters(ctx context.Context) *sync.WaitGroup
 	startSignal := make(chan struct{})
 	itersPerWorker := distributeIterations(e.cfg.Iterations, e.cfg.Workers)
 
-	startWorker := func(wg *sync.WaitGroup, workerID, iterCount int, start chan struct{}, logger *zerolog.Logger) {
+	startWorker := func(wg *sync.WaitGroup, workerID, iterCount int) {
 		defer wg.Done()
 		if iterCount == 0 {
 			return
 		}
-		<-start
+		<-startSignal
 		for i := 0; i < iterCount; i++ {
 			if ctx.Err() != nil {
-				logger.Error().Int("worker-id", workerID).Err(ctx.Err()).Msg("context err from worker")
+				e.log().Error().Int("worker-id", workerID).Err(ctx.Err()).Msg("context err from worker")
 				return
 			}
-
-			start := time.Now()
-			queryStat, err := e.queryFunc.Perform(ctx)
-			if err != nil {
-				logger.Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
-				continue
-			}
-
 			select {
 			case <-ctx.Done():
-				logger.Info().Int("worker-id", workerID).Msg("getting 'Done' signal from the context")
+				e.log().Info().Int("worker-id", workerID).Msg("getting 'Done' signal from the context")
 				return
 			default:
+				start := time.Now()
+				queryStat, err := e.p.Perform(ctx)
+				if err != nil {
+					e.log().Error().Int("worker-id", workerID).Err(err).Msg("query error from worker")
+				}
 				e.queryChan <- queryStat
+				pacing(start, e.cfg.Pacing)
 				e.pgBar.Increment()
 			}
-			pacing(start, e.cfg.Pacing)
 		}
 	}
 
 	for i := 0; i < e.cfg.Workers; i++ {
 		wg.Add(1)
 		workerID := i
-		go startWorker(&wg, workerID, itersPerWorker[workerID], startSignal, e.Log())
+		go startWorker(&wg, workerID, itersPerWorker[workerID])
 	}
 
 	close(startSignal)
 	return &wg
 }
 
-func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
-	if e.pgBar != nil {
-		e.pgBar.Start(ctx)
-		defer e.pgBar.Stop()
+func (e *QuickExecutor) start(ctx context.Context) *sync.WaitGroup {
+	switch {
+	case e.cfg.Iterations > 0:
+		e.log().Info().Msg("starting the test based on iterations")
+		return e.startWorkersOnIters(ctx)
+	case e.cfg.Duration > 0:
+		e.log().Info().Msg("starting the test based on duration")
+		return e.startWorkersOnDur(ctx)
+	default:
+		e.log().Error().Msg("invalid configuration: both iterations and duration are zero")
+		return nil
 	}
-
-	stats := stat.NewStat()
-	wgStats := startStatsCollector(ctx, stats, e.queryChan)
-
-	wgWorkers := e.start(ctx)
-
-	go func() {
-		wgWorkers.Wait()
-		close(e.queryChan)
-	}()
-
-	wgStats.Wait()
-	stats.Query = e.cfg.Query
-	return stats
 }
 
-func (e *QuickExecutor) start(ctx context.Context) *sync.WaitGroup {
-	if e.cfg.Iterations > 0 {
-		e.Log().Info().Msg("starting the test based on iterations")
-		wg := e.startWorkersOnIters(ctx)
-		return wg
-	} else if e.cfg.Duration > 0 {
-		e.Log().Info().Msg("starting the test based on duration")
-		wg := e.startWorkersOnDur(ctx)
-		return wg
-	}
+func (e *QuickExecutor) log() *zerolog.Logger {
+	return e.cfg.Logger
+}
 
-	return nil
+func getSQLDBInstance(cfg *model.QuickRun) (db.SQLWrapper, error) {
+	switch cfg.Driver {
+	case "mysql":
+		return db.NewMySQLWrapper(cfg.Driver, cfg.Dsn), nil
+	case "postgres":
+		return db.NewPsqlWrapper(cfg.Driver, cfg.Dsn), nil
+	default:
+		return nil, fmt.Errorf("unsupported db driver: %s", cfg.Driver)
+	}
+}
+
+func getPreparedQuery(cfg *model.QuickRun) (*parse.PreparedQuery, error) {
+	preparedQuery, err := parse.GetPreparedQuery(cfg.Query)
+	if err != nil {
+		errMsg := "failed to get prepared query"
+		cfg.Logger.Err(err).Msg(errMsg)
+		return nil, fmt.Errorf("%s: %v", errMsg, err)
+	}
+	return preparedQuery, nil
+}
+
+func getPerformer(queryType string, conn db.SQLWrapper, tmpl *template.Template) (perform.Performer, error) {
+	switch queryType {
+	case parse.QueryTypeRead:
+		return perform.NewQueryReader(conn, tmpl), nil
+	case parse.QueryTypeExec:
+		return perform.NewQueryExecutor(conn, tmpl), nil
+	default:
+		return nil, perform.NewPerformerError(fmt.Sprintf("unsupported query type: %s", queryType), nil)
+	}
+}
+
+func getProgressBar(cfg *model.QuickRun) (progress.ProgressReporter, error) {
+	barCfg := progress.BarConfig{
+		MaxValue:  getProgressBarMaxValue(cfg),
+		EnableBar: true,
+		Logger:    cfg.Logger,
+	}
+	return progress.NewProgressBarWrapper(barCfg)
 }
 
 func distributeIterations(total, workers int) []int {
@@ -241,26 +278,13 @@ func startStatsCollector(ctx context.Context, stats *stat.Stat, queryChan chan *
 	return &wg
 }
 
-func getProgressBarMaxValue(cfg *QuickRun) int {
-	/*
-		dur = 1 min
-		pacing = 100 ms
-		workers = 2
-		600 = 60000 (1 min) / 100
-		1200 = 600 * 2
-
-		max value = 1200
-	*/
-	var maxValue int
-	if cfg.Pacing != 0 {
-		maxValue = int(cfg.Duration/cfg.Pacing) * cfg.Workers
-	} else {
-		if cfg.Duration != 0 {
-			maxValue = -1
-		} else {
-			maxValue = cfg.Iterations
-		}
+func getProgressBarMaxValue(cfg *model.QuickRun) int {
+	switch {
+	case cfg.Iterations > 0:
+		return cfg.Iterations
+	case cfg.Pacing > 0 && cfg.Duration > 0:
+		return int(cfg.Duration/cfg.Pacing) * cfg.Workers
+	default:
+		return -1
 	}
-
-	return maxValue
 }

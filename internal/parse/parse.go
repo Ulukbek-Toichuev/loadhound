@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	QueryTypeExec    = "exec"
-	QueryTypeRead    = "query"
-	QueryTypeUnknown = "unknown"
+	QueryTypeExec    string = "exec"
+	QueryTypeRead    string = "query"
+	QueryTypeUnknown string = "unknown"
 )
 
 // ParseError represents an error that occurred during query parsing.

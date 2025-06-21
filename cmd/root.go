@@ -11,6 +11,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,10 @@ var rootCmd = &cobra.Command{
 	Use:   "loadhound",
 	Short: "Relentless SQL load testing tool.",
 	Long:  "Relentless SQL load testing tool. Hunt for latency, errors and bottlenecks.",
+}
+
+type Executor interface {
+	Run(ctx context.Context) *stat.Stat
 }
 
 func Execute(ctx context.Context) {

@@ -8,10 +8,13 @@ Licensed under the MIT License.
 package pkg
 
 import (
+	"database/sql"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"time"
+
+	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 
 	"github.com/common-nighthawk/go-figure"
 	"github.com/google/uuid"
@@ -19,6 +22,8 @@ import (
 )
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+var AvailableDrivers []string = []string{"mysql", "postgres"}
 
 func RandIntRange(min, max int) int {
 	if min >= max {
@@ -79,4 +84,24 @@ func GetLogger() *zerolog.Logger {
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC822}).Level(zerolog.TraceLevel).With().Timestamp().Logger()
 	logger.Info().Msg("getting logger instance")
 	return &logger
+}
+
+func MeasureLatency(f func() (int64, error)) *stat.QueryStat {
+	start := time.Now()
+	count, err := f()
+	latency := time.Since(start)
+
+	return stat.NewQueryStat(latency, err, count)
+}
+
+func CountRows(rows *sql.Rows) (int64, error) {
+	defer rows.Close()
+	var count int64
+	if err := rows.Err(); err != nil {
+		return count, err
+	}
+	for rows.Next() {
+		count++
+	}
+	return count, nil
 }

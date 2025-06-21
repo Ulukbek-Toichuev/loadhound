@@ -52,7 +52,7 @@ func formatQueryStats(r *Result) string {
 
 func formatLatency(r *Result) string {
 	return fmt.Sprintf(
-		"Latency (ms)\n──────────────────────────────\nMin:              %d ms\nMax:              %d ms\nAvg:              %.2f ms\nMedian:           %d ms\nP90:              %d ms\nP95:              %d ms\nP99:              %d ms\n\n",
+		"Latency (ms)\n──────────────────────────────\nMin:              %dms\nMax:              %dms\nAvg:              %.2fms\nMedian:           %dms\nP90:              %dms\nP95:              %dms\nP99:              %dms\n\n",
 		r.Latency.Min, r.Latency.Max, r.Latency.Avg, r.Latency.Median, r.Latency.P90, r.Latency.P95, r.Latency.P99,
 	)
 }
