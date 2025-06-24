@@ -53,7 +53,6 @@ func (s *Stat) SubmitStat(qr *QueryStat) {
 		s.Success++
 		s.QueriesRespList = append(s.QueriesRespList, qr.Latency.Milliseconds())
 	}
-
 	s.Total++
 }
 
@@ -86,7 +85,6 @@ func NewLatency(min, max, median, p90, p95, p99 int64, avg float64) *Latency {
 
 func GetResult(start, end time.Time, stat *Stat) *Result {
 	var result Result
-
 	totalTime := end.Sub(start)
 	result.Start = start.Format(time.RFC822)
 	result.End = end.Format(time.RFC822)

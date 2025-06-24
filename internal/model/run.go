@@ -10,12 +10,12 @@ type QuickRun struct {
 	Driver        string
 	Dsn           string
 	PathToSQLFile string
-	Query         string
+	QueryTemplate string
 	Workers       int
 	Iterations    int
 	Duration      time.Duration
 	Pacing        time.Duration
 	OutputFile    string
-	UsePrepare    bool
+	UseStmt       bool
 	Logger        *zerolog.Logger
 }

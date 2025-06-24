@@ -8,64 +8,116 @@ Licensed under the MIT License.
 package parse
 
 import (
-	"regexp"
+	"errors"
+	"fmt"
 	"strings"
 	"text/template"
 
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
+	"github.com/jmoiron/sqlx"
 )
+
+type QueryType int
 
 const (
-	QueryTypeExec    string = "exec"
-	QueryTypeRead    string = "query"
-	QueryTypeUnknown string = "unknown"
+	QueryTypeUnknown QueryType = iota
+	QueryTypeExec
+	QueryTypeRead
 )
 
-// ParseError represents an error that occurred during query parsing.
-type ParseError struct {
-	Message string
-	Err     error
+func (qt QueryType) String() string {
+	switch qt {
+	case QueryTypeExec:
+		return "exec"
+	case QueryTypeRead:
+		return "query"
+	default:
+		return "unknown"
+	}
 }
 
-func NewParseError(msg string, err error) *ParseError {
-	return &ParseError{msg, err}
-}
-
-func (e *ParseError) Error() string {
-	return e.Message
-}
-
-func (e *ParseError) Unwrap() error {
-	return e.Err
-}
-
-// PreparedQuery holds cleaned query text and its type.
 type PreparedQuery struct {
 	RawSQL    string
 	QueryType string
 }
 
-func NewPreparedQuery(sql string, typ string) *PreparedQuery {
-	return &PreparedQuery{RawSQL: sql, QueryType: typ}
+func NewPreparedQuery(sql string, queryType string) *PreparedQuery {
+	return &PreparedQuery{RawSQL: sql, QueryType: queryType}
 }
 
-// GetPrepareQuery cleans the query and identify its type.
 func GetPreparedQuery(query string) (*PreparedQuery, error) {
 	clean := removeComments(query)
 	if clean == "" {
-		return nil, NewParseError("query contains only comments", nil)
+		return nil, errors.New("query contains only comments")
 	}
 	return identifyQuery(clean), nil
 }
 
 func removeComments(sql string) string {
-	reMultiline := regexp.MustCompile(`(?s)/\*.*?\*/`)
-	sql = reMultiline.ReplaceAllString(sql, "")
+	var result strings.Builder
+	inSingleLineComment := false
+	inMultiLineComment := 0
+	inSingleQuote := false
+	inDoubleQuote := false
 
-	reSingleLine := regexp.MustCompile(`(?m)--.*$`)
-	sql = reSingleLine.ReplaceAllString(sql, "")
+	i := 0
+	for i < len(sql) {
+		ch := sql[i]
 
-	return strings.TrimSpace(sql)
+		// Проверка на начало строки комментария -- (если не в строке и не в блоке)
+		if !inSingleQuote && !inDoubleQuote && inMultiLineComment == 0 {
+			if ch == '-' && i+1 < len(sql) && sql[i+1] == '-' {
+				inSingleLineComment = true
+				i += 2
+				// Пропускаем до конца строки
+				for i < len(sql) && sql[i] != '\n' {
+					i++
+				}
+				continue
+			}
+			// Начало многострочного комментария
+			if ch == '/' && i+1 < len(sql) && sql[i+1] == '*' {
+				inMultiLineComment++
+				i += 2
+				continue
+			}
+		}
+
+		// Проверка на конец многострочного комментария
+		if inMultiLineComment > 0 {
+			if ch == '*' && i+1 < len(sql) && sql[i+1] == '/' {
+				inMultiLineComment--
+				i += 2
+				continue
+			}
+			i++
+			continue
+		}
+
+		// Выход из однострочного комментария
+		if inSingleLineComment {
+			if ch == '\n' {
+				inSingleLineComment = false
+				result.WriteByte(ch)
+			}
+			i++
+			continue
+		}
+
+		// Обработка строк — отслеживаем кавычки
+		if ch == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+		}
+		if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		}
+
+		// Добавляем символ в результат
+		result.WriteByte(ch)
+		i++
+	}
+
+	return strings.TrimSpace(result.String())
 }
 
 func identifyQuery(sql string) *PreparedQuery {
@@ -74,45 +126,117 @@ func identifyQuery(sql string) *PreparedQuery {
 	case strings.HasPrefix(upper, "INSERT"),
 		strings.HasPrefix(upper, "UPDATE"),
 		strings.HasPrefix(upper, "DELETE"):
-		return NewPreparedQuery(sql, QueryTypeExec)
+		return NewPreparedQuery(sql, QueryTypeExec.String())
+
 	case strings.HasPrefix(upper, "SELECT"),
 		strings.HasPrefix(upper, "WITH"):
-		return NewPreparedQuery(sql, QueryTypeRead)
+		return NewPreparedQuery(sql, QueryTypeRead.String())
+
 	default:
-		return NewPreparedQuery(sql, QueryTypeUnknown)
+		return NewPreparedQuery(sql, QueryTypeUnknown.String())
 	}
 }
 
-// ParseQueryTemplate parses a SQL query with Go templating syntax.
-func ParseQueryTemplate(query string) (*template.Template, error) {
-	tmpl := template.New(query)
-	tmpl, err := tmpl.Parse(query)
+func GetQueryTemplate(queryTemplate string) (*template.Template, error) {
+	tmpl := template.New(queryTemplate)
+	tmpl, err := tmpl.Parse(queryTemplate)
 	if err != nil {
-		return nil, NewParseError("failed to parse query template", err)
+		return nil, fmt.Errorf("failed to parse query template: %v", err)
 	}
 	return tmpl, nil
 }
 
-// RenderTemplateQuery executes a parsed query template with data functions.
+type funcs struct {
+	RandIntRange       func(min, max int) int
+	RandFloat64InRange func(min, max float64) float64
+	RandUUID           func() string
+	RandStringInRange  func(min, max int) string
+	RandBool           func() bool
+	GetTime            func() string
+}
+
 func RenderTemplateQuery(t *template.Template) (string, error) {
 	sb := &strings.Builder{}
-
-	data := struct {
-		RandIntRange       func(min, max int) int
-		RandFloat64InRange func(min, max float64) float64
-		RandUUID           func() string
-		RandStringInRange  func(min, max int) string
-		GetTime            func() string
-	}{
+	fs := funcs{
 		RandIntRange:       pkg.RandIntRange,
 		RandFloat64InRange: pkg.RandFloat64InRange,
 		RandUUID:           pkg.RandUUID,
 		RandStringInRange:  pkg.RandStringInRange,
+		RandBool:           pkg.RandBool,
 		GetTime:            pkg.GetTime,
 	}
 
-	if err := t.Execute(sb, data); err != nil {
-		return "", NewParseError("failed to execute query template", err)
+	if err := t.Execute(sb, fs); err != nil {
+		return "", fmt.Errorf("failed to execute query template: %v", err)
 	}
 	return sb.String(), nil
+}
+
+func RenderQueryWithPlaceholders(t *template.Template, driverType string) (string, error) {
+	sb := &strings.Builder{}
+
+	data := struct {
+		RandIntRange       func(min, max int) string
+		RandFloat64InRange func(min, max float64) string
+		RandUUID           func() string
+		RandStringInRange  func(min, max int) string
+		RandBool           func() string
+		GetTime            func() string
+	}{
+		RandIntRange:       func(min, max int) string { return "?" },
+		RandFloat64InRange: func(min, max float64) string { return "?" },
+		RandUUID:           func() string { return "?" },
+		RandStringInRange:  func(min, max int) string { return "?" },
+		RandBool:           func() string { return "?" },
+		GetTime:            func() string { return "?" },
+	}
+
+	if err := t.Execute(sb, data); err != nil {
+		return "", fmt.Errorf("failed to execute query template: %v", err)
+	}
+	if driverType == string(pkg.Mysql) {
+		return sb.String(), nil
+	}
+
+	switch driverType {
+	case string(pkg.Postgres):
+		return sqlx.Rebind(sqlx.DOLLAR, sb.String()), nil
+	default:
+		return "", errors.New("unknown driver type")
+	}
+}
+
+func RenderQueryParams(t *template.Template) ([]interface{}, error) {
+	sb := &strings.Builder{}
+	params := make([]interface{}, 0)
+	fs := funcs{
+		RandIntRange: func(min, max int) int {
+			params = append(params, pkg.RandIntRange(min, max))
+			return 0
+		},
+		RandFloat64InRange: func(min, max float64) float64 {
+			params = append(params, pkg.RandFloat64InRange(min, max))
+			return 0
+		},
+		RandUUID: func() string {
+			params = append(params, pkg.RandUUID())
+			return ""
+		},
+		RandStringInRange: func(min, max int) string {
+			params = append(params, pkg.RandStringInRange(min, max))
+			return ""
+		},
+		RandBool: func() bool {
+			params = append(params, pkg.RandBool())
+			return false
+		},
+		GetTime: func() string {
+			params = append(params, pkg.GetTime())
+			return ""
+		},
+	}
+	if err := t.Execute(sb, fs); err != nil {
+		return nil, fmt.Errorf("failed to execute query template: %v", err)
+	}
+	return params, nil
 }

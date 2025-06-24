@@ -63,27 +63,27 @@ func TestClassifyQuery(t *testing.T) {
 		{
 			name:        "case: 'select' query",
 			query:       "select * from users;",
-			expectedMsg: QueryTypeRead,
+			expectedMsg: QueryTypeRead.String(),
 		},
 		{
 			name:        "case: 'CTE' query",
 			query:       "WITH temp AS (SELECT 1) SELECT * FROM temp;",
-			expectedMsg: QueryTypeRead,
+			expectedMsg: QueryTypeRead.String(),
 		},
 		{
 			name:        "case: 'insert' query",
 			query:       "insert into users(username) values('uluk');",
-			expectedMsg: QueryTypeExec,
+			expectedMsg: QueryTypeExec.String(),
 		},
 		{
 			name:        "case: 'update' query",
 			query:       "update users set username = Uluk where user_id = 1;",
-			expectedMsg: QueryTypeExec,
+			expectedMsg: QueryTypeExec.String(),
 		},
 		{
 			name:        "case: 'delete' query",
 			query:       "delete from users where user_id = 1;",
-			expectedMsg: QueryTypeExec,
+			expectedMsg: QueryTypeExec.String(),
 		},
 	}
 

@@ -8,7 +8,6 @@ Licensed under the MIT License.
 package pkg
 
 import (
-	"database/sql"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -23,7 +22,27 @@ import (
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-var AvailableDrivers []string = []string{"mysql", "postgres"}
+type DriverType string
+
+const (
+	Postgres DriverType = "postgres"
+	Mysql    DriverType = "mysql"
+	Unknown  DriverType = "unknown"
+)
+
+func GetDriverType(d string) DriverType {
+	switch d {
+	case string(Postgres):
+		return Postgres
+	case string(Mysql):
+		return Postgres
+	}
+	return Unknown
+}
+
+func RandBool() bool {
+	return rand.IntN(1) == 1
+}
 
 func RandIntRange(min, max int) int {
 	if min >= max {
@@ -92,16 +111,4 @@ func MeasureLatency(f func() (int64, error)) *stat.QueryStat {
 	latency := time.Since(start)
 
 	return stat.NewQueryStat(latency, err, count)
-}
-
-func CountRows(rows *sql.Rows) (int64, error) {
-	defer rows.Close()
-	var count int64
-	if err := rows.Err(); err != nil {
-		return count, err
-	}
-	for rows.Next() {
-		count++
-	}
-	return count, nil
 }

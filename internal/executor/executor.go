@@ -42,18 +42,31 @@ func NewQuickExecutor(cfg *model.QuickRun, performer perform.Performer, reporter
 	}
 }
 
-func BuildQuickExecutor(ctx context.Context, cfg *model.QuickRun, tmpl *template.Template) (*QuickExecutor, error) {
-	conn, err := getSQLDBInstance(cfg)
-	if err != nil {
-		return nil, err
+func getDBInstance(ctx context.Context, cfg *model.QuickRun, tmpl *template.Template) (*db.SQLWrapper, error) {
+	if cfg.Driver == "postgres" || cfg.Driver == "mysql" {
+		return db.NewSQLWrapper(ctx, cfg, tmpl)
 	}
+	return nil, fmt.Errorf("failed to get db instance, unknown driver type")
+}
 
+func BuildQuickExecutor(ctx context.Context, cfg *model.QuickRun) (*QuickExecutor, error) {
 	preparedQuery, err := getPreparedQuery(cfg)
 	if err != nil {
 		return nil, err
 	}
+	cfg.QueryTemplate = preparedQuery.RawSQL
 
-	performer, err := getPerformer(preparedQuery.QueryType, conn, tmpl)
+	cfg.Logger.Info().Msg("getting query template")
+	tmpl, err := parse.GetQueryTemplate(preparedQuery.RawSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get template: %v", err)
+	}
+	db, err := getDBInstance(ctx, cfg, tmpl)
+	if err != nil {
+		return nil, err
+	}
+
+	performer, err := getPerformer(preparedQuery.QueryType, db, tmpl, cfg.UseStmt)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +96,11 @@ func (e *QuickExecutor) Run(ctx context.Context) *stat.Stat {
 		return stats
 	}
 
-	go func() {
-		wgWorkers.Wait()
-		close(e.queryChan)
-	}()
-
+	wgWorkers.Wait()
+	close(e.queryChan)
 	wgStats.Wait()
-	stats.Query = e.cfg.Query
+
+	e.p.Close()
 	return stats
 }
 
@@ -196,19 +207,8 @@ func (e *QuickExecutor) log() *zerolog.Logger {
 	return e.cfg.Logger
 }
 
-func getSQLDBInstance(cfg *model.QuickRun) (db.SQLWrapper, error) {
-	switch cfg.Driver {
-	case "mysql":
-		return db.NewMySQLWrapper(cfg.Driver, cfg.Dsn), nil
-	case "postgres":
-		return db.NewPsqlWrapper(cfg.Driver, cfg.Dsn), nil
-	default:
-		return nil, fmt.Errorf("unsupported db driver: %s", cfg.Driver)
-	}
-}
-
 func getPreparedQuery(cfg *model.QuickRun) (*parse.PreparedQuery, error) {
-	preparedQuery, err := parse.GetPreparedQuery(cfg.Query)
+	preparedQuery, err := parse.GetPreparedQuery(cfg.QueryTemplate)
 	if err != nil {
 		errMsg := "failed to get prepared query"
 		cfg.Logger.Err(err).Msg(errMsg)
@@ -217,12 +217,12 @@ func getPreparedQuery(cfg *model.QuickRun) (*parse.PreparedQuery, error) {
 	return preparedQuery, nil
 }
 
-func getPerformer(queryType string, conn db.SQLWrapper, tmpl *template.Template) (perform.Performer, error) {
+func getPerformer(queryType string, conn db.SQLExecutor, tmpl *template.Template, isStmt bool) (perform.Performer, error) {
 	switch queryType {
-	case parse.QueryTypeRead:
-		return perform.NewQueryReader(conn, tmpl), nil
-	case parse.QueryTypeExec:
-		return perform.NewQueryExecutor(conn, tmpl), nil
+	case parse.QueryTypeRead.String():
+		return perform.NewSQLPerformQueryRows(conn, tmpl, isStmt), nil
+	case parse.QueryTypeExec.String():
+		return perform.NewSQLPerformExec(conn, tmpl, isStmt), nil
 	default:
 		return nil, perform.NewPerformerError(fmt.Sprintf("unsupported query type: %s", queryType), nil)
 	}
