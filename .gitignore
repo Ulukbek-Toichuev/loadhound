@@ -37,3 +37,6 @@ config.yml
 
 # .json files
 *.json
+
+# .vscode directory
+.vscode
