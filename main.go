@@ -152,10 +152,15 @@ type Executor interface {
 func Start(ctx context.Context, exec Executor) error {
 	generalEvent.WriteInfoMsgWithBar("start test")
 	defer generalEvent.WriteInfoMsgWithBar("end test")
+
+	start := time.Now()
 	result := exec.Run(ctx)
+	end := time.Now()
 	if result == nil {
 		return errors.New("unexpected situation, stat pointer is null")
 	}
+
+	stat.PrintResultPretty(stat.GetReport(start, end, result))
 	return nil
 }
 
