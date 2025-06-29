@@ -12,13 +12,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/fatih/color"
 )
 
 func PrintResultPretty(r *Result) {
 	var result strings.Builder
+	title := color.New(color.FgWhite, color.Bold).SprintFunc()
 
 	sections := []string{
-		formatHeader(),
+		formatHeader(title),
 		formatMeta(r),
 		formatQueryStats(r),
 		formatLatency(r),
@@ -32,8 +35,8 @@ func PrintResultPretty(r *Result) {
 	fmt.Println(result.String())
 }
 
-func formatHeader() string {
-	return "\n\nTest summary\n──────────────────────────────\n"
+func formatHeader(title func(a ...interface{}) string) string {
+	return fmt.Sprintf("\n\n%s\n──────────────────────────────\n", title("Test summary"))
 }
 
 func formatMeta(r *Result) string {

@@ -16,13 +16,15 @@ import (
 )
 
 type QueryStat struct {
+	WorkerID     int
 	Latency      time.Duration
 	Err          error
 	AffectedRows int64
+	Query        string
 }
 
-func NewQueryStat(latency time.Duration, err error, affectedRows int64) *QueryStat {
-	return &QueryStat{Latency: latency, Err: err, AffectedRows: affectedRows}
+func NewQueryStat(latency time.Duration, err error, affectedRows int64, query string) *QueryStat {
+	return &QueryStat{Latency: latency, Err: err, AffectedRows: affectedRows, Query: query}
 }
 
 type Stat struct {
@@ -83,11 +85,11 @@ func NewLatency(min, max, median, p90, p95, p99 int64, avg float64) *Latency {
 	return &Latency{min, max, avg, median, p90, p95, p99}
 }
 
-func GetResult(start, end time.Time, stat *Stat) *Result {
+func GetReport(start, end time.Time, stat *Stat) *Result {
 	var result Result
 	totalTime := end.Sub(start)
-	result.Start = start.Format(time.RFC822)
-	result.End = end.Format(time.RFC822)
+	result.Start = start.Format(time.RFC3339)
+	result.End = end.Format(time.RFC3339)
 	result.TotalTime = formatDuration(totalTime)
 	result.Query = stat.Query
 	result.TotalQueries = stat.Total

@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"text/template"
 
-	"github.com/Ulukbek-Toichuev/loadhound/internal/model"
+	"github.com/Ulukbek-Toichuev/loadhound/internal"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
 	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
@@ -35,20 +35,16 @@ type SQLWrapper struct {
 	stmt *sql.Stmt
 }
 
-func NewSQLWrapper(ctx context.Context, cfg *model.QuickRun, tmpl *template.Template) (*SQLWrapper, error) {
+func NewSQLWrapper(ctx context.Context, cfg *internal.DbConfig, tmpl *template.Template) (*SQLWrapper, error) {
 	db, err := sql.Open(cfg.Driver, cfg.Dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse pool config: %w", err)
+		return nil, fmt.Errorf("failed to get db instance: %w", err)
 	}
-	db.SetMaxOpenConns(2)
-
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed ping server: %w", err)
 	}
 	if cfg.UseStmt {
-		// query := `INSERT INTO tasks (title, description, priority)
-		// VALUES (?, ?, ?);`
 		queryWithPlaceHolder, err := parse.RenderQueryWithPlaceholders(tmpl, cfg.Driver)
 		if err != nil {
 			db.Close()
@@ -57,7 +53,7 @@ func NewSQLWrapper(ctx context.Context, cfg *model.QuickRun, tmpl *template.Temp
 		stmt, err := db.Prepare(queryWithPlaceHolder)
 		if err != nil {
 			db.Close()
-			return nil, fmt.Errorf("failed to get stmt: %w", err)
+			return nil, fmt.Errorf("failed to get prepared statement: %w", err)
 		}
 		return &SQLWrapper{db: db, stmt: stmt}, nil
 	}
@@ -72,7 +68,7 @@ func (sw *SQLWrapper) Close() error {
 }
 
 func (sw *SQLWrapper) ExecWithLatency(ctx context.Context, query string) *stat.QueryStat {
-	return pkg.MeasureLatency(func() (int64, error) {
+	return pkg.MeasureLatency(query, func() (int64, error) {
 		result, err := sw.db.ExecContext(ctx, query)
 		if err != nil {
 			return 0, err
@@ -82,7 +78,7 @@ func (sw *SQLWrapper) ExecWithLatency(ctx context.Context, query string) *stat.Q
 }
 
 func (sw *SQLWrapper) QueryRowsWithLatency(ctx context.Context, query string) *stat.QueryStat {
-	return pkg.MeasureLatency(func() (int64, error) {
+	return pkg.MeasureLatency(query, func() (int64, error) {
 		rows, err := sw.db.QueryContext(ctx, query)
 		if err != nil {
 			return 0, err
@@ -92,7 +88,7 @@ func (sw *SQLWrapper) QueryRowsWithLatency(ctx context.Context, query string) *s
 }
 
 func (sw *SQLWrapper) StmtExecWithLatency(ctx context.Context, args ...any) *stat.QueryStat {
-	return pkg.MeasureLatency(func() (int64, error) {
+	return pkg.MeasureLatency(fmt.Sprintf("%v", args...), func() (int64, error) {
 		result, err := sw.stmt.ExecContext(ctx, args...)
 		if err != nil {
 			return 0, err
@@ -102,7 +98,7 @@ func (sw *SQLWrapper) StmtExecWithLatency(ctx context.Context, args ...any) *sta
 }
 
 func (sw *SQLWrapper) StmtQueryRowsWithLatency(ctx context.Context, args ...any) *stat.QueryStat {
-	return pkg.MeasureLatency(func() (int64, error) {
+	return pkg.MeasureLatency(fmt.Sprintf("%v", args...), func() (int64, error) {
 		rows, err := sw.stmt.QueryContext(ctx, args...)
 		if err != nil {
 			return 0, err

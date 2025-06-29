@@ -89,7 +89,7 @@ func TestClassifyQuery(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := identifyQuery(tc.query)
+			actual := IdentifyQuery(tc.query)
 			assert.Equal(t, tc.query, actual.RawSQL)
 			assert.Equal(t, tc.expectedMsg, actual.QueryType)
 		})

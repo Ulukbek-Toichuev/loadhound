@@ -50,7 +50,7 @@ func GetPreparedQuery(query string) (*PreparedQuery, error) {
 	if clean == "" {
 		return nil, errors.New("query contains only comments")
 	}
-	return identifyQuery(clean), nil
+	return IdentifyQuery(clean), nil
 }
 
 func removeComments(sql string) string {
@@ -120,7 +120,7 @@ func removeComments(sql string) string {
 	return strings.TrimSpace(result.String())
 }
 
-func identifyQuery(sql string) *PreparedQuery {
+func IdentifyQuery(sql string) *PreparedQuery {
 	upper := strings.ToUpper(sql)
 	switch {
 	case strings.HasPrefix(upper, "INSERT"),

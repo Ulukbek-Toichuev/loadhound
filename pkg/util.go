@@ -17,7 +17,6 @@ import (
 
 	"github.com/common-nighthawk/go-figure"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 )
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -96,19 +95,17 @@ func PrintAsciiArtLogo() {
 	myFigure := figure.NewColorFigure("LoadHound", "", "red", true)
 	myFigure.Print()
 
-	fmt.Printf("\nLoadHound — Relentless SQL load testing tool.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com\n\n")
+	fmt.Printf("\nLoadHound — Relentless SQL load testing tool %s.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com\n\n", PrintVersion())
 }
 
-func GetLogger() *zerolog.Logger {
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC822}).Level(zerolog.TraceLevel).With().Timestamp().Logger()
-	logger.Info().Msg("getting logger instance")
-	return &logger
-}
-
-func MeasureLatency(f func() (int64, error)) *stat.QueryStat {
+func MeasureLatency(query string, f func() (int64, error)) *stat.QueryStat {
 	start := time.Now()
 	count, err := f()
 	latency := time.Since(start)
 
-	return stat.NewQueryStat(latency, err, count)
+	return stat.NewQueryStat(latency, err, count, query)
+}
+
+func PrintVersion() string {
+	return "v0.0.1"
 }
