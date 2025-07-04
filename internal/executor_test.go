@@ -5,7 +5,7 @@ Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 Licensed under the MIT License.
 */
 
-package executor
+package internal
 
 import (
 	"reflect"
@@ -20,46 +20,46 @@ func TestDistributeIterations(t *testing.T) {
 	tests := []struct {
 		name     string
 		total    int
-		workers  int
+		threads  int
 		expected []int
 	}{
 		{
 			name:     "evenly divisible",
 			total:    10,
-			workers:  2,
+			threads:  2,
 			expected: []int{5, 5},
 		},
 		{
 			name:     "not evenly divisible",
 			total:    10,
-			workers:  3,
+			threads:  3,
 			expected: []int{4, 3, 3},
 		},
 		{
-			name:     "single worker",
+			name:     "single thread",
 			total:    5,
-			workers:  1,
+			threads:  1,
 			expected: []int{5},
 		},
 		{
-			name:     "more workers than iterations",
+			name:     "more thread than iterations",
 			total:    3,
-			workers:  5,
+			threads:  5,
 			expected: []int{1, 1, 1, 0, 0},
 		},
 		{
 			name:     "zero iterations",
 			total:    0,
-			workers:  3,
+			threads:  3,
 			expected: []int{0, 0, 0},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := distributeIterations(tt.total, tt.workers)
+			got := distributeIterations(tt.total, tt.threads)
 			if !reflect.DeepEqual(got, tt.expected) {
-				t.Errorf("distributeIterations(%d, %d) = %v, want %v", tt.total, tt.workers, got, tt.expected)
+				t.Errorf("distributeIterations(%d, %d) = %v, want %v", tt.total, tt.threads, got, tt.expected)
 			}
 		})
 	}
@@ -96,10 +96,8 @@ func TestPacing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			start := time.Now()
 
-			// эмулируем работу
 			time.Sleep(tt.fakeWorkTime)
 
-			// вызываем pacing
 			pacing(start, tt.pacingDuration)
 
 			totalElapsed := time.Since(start)

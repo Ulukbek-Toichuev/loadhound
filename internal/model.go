@@ -7,87 +7,55 @@ Licensed under the MIT License.
 
 package internal
 
-import "time"
-
-// Base structure for another flags
-// New flag must extend this structures
-type BaseFlag struct {
-	Name        string
-	ShortName   string
-	Description string
-}
-
-type RunTestFlag struct {
-	BaseFlag
-	Value        string
-	DefaultValue string
-}
-
-func NewRunTestFlag() *RunTestFlag {
-	return &RunTestFlag{
-		BaseFlag: BaseFlag{
-			Name:        "run-test",
-			ShortName:   "rt",
-			Description: "Path to your *.yaml file for running simple test",
-		},
-		DefaultValue: "",
-	}
-}
-
-type VersionFlag struct {
-	BaseFlag
-	Value        bool
-	DefaultValue bool
-}
-
-func NewVersionFlag() *VersionFlag {
-	return &VersionFlag{
-		BaseFlag: BaseFlag{
-			Name:        "version",
-			ShortName:   "v",
-			Description: "Get LoadHound version",
-		},
-		DefaultValue: false,
-	}
-}
+import (
+	"time"
+)
 
 type RunTestConfig struct {
-	DbConfig            DbConfig            `yaml:"db"`
-	QueryTemplateConfig QueryTemplateConfig `yaml:"query_template"`
-	TestConfig          TestConfig          `yaml:"test"`
-	OutputConfig        OutputConfig        `yaml:"output"`
+	DbConfig            *DbConfig            `toml:"db" json:"db" validate:"required"`
+	QueryTemplateConfig *QueryTemplateConfig `toml:"query_template" json:"query_tempalte" validate:"required"`
+	WorkflowConfig      *WorkflowConfig      `toml:"workflow" json:"workflow" validate:"required"`
+	OutputConfig        *OutputConfig        `toml:"output" json:"output"`
 }
 
 type DbConfig struct {
-	Driver             string        `yaml:"driver" validate:"required"`
-	Dsn                string        `yaml:"dsn" validate:"required"`
-	MaxOpenConnections int           `yaml:"max_open_connections"`
-	MaxIdleConnections int           `yaml:"max_idle_connections"`
-	ConnMaxIdleTime    time.Duration `yaml:"conn_max_idle_time"`
-	ConnMaxLifeTime    time.Duration `yaml:"conn_max_life_time"`
-	UseStmt            bool          `yaml:"use_prepared_statements"`
+	Driver    string     `toml:"driver" json:"driver" validate:"required"`
+	Dsn       string     `toml:"dsn" json:"dsn" validate:"required"`
+	SQLConfig *SQLConfig `toml:"sql_config" json:"sql_config"`
+}
+
+type SQLConfig struct {
+	MaxOpenConnections int           `toml:"max_open_connections" json:"max_open_connections"`
+	MaxIdleConnections int           `toml:"max_idle_connections" json:"max_idle_connections"`
+	ConnMaxIdleTime    time.Duration `toml:"conn_max_idle_time" json:"conn_max_idle_time"`
+	ConnMaxLifeTime    time.Duration `toml:"conn_max_life_time" json:"conn_max_life_time"`
+	UseStmt            bool          `toml:"use_prepared_statements" json:"use_prepared_statements"`
 }
 
 type QueryTemplateConfig struct {
-	PathToQuery string `yaml:"path_to_query"`
-	InlineQuery string `yaml:"inline_query"`
+	Name     string `toml:"name" json:"name"`
+	Template string `toml:"template" json:"template" validate:"required"`
 }
 
-type TestConfig struct {
-	Type       string        `yaml:"type"`
-	Iterations int           `yaml:"iterations"`
-	Duration   time.Duration `yaml:"duration"`
-	Workers    int           `yaml:"workers" validate:"required,min=1"`
-	Pacing     time.Duration `yaml:"pacing"`
+type WorkflowConfig struct {
+	Type       string        `toml:"type" json:"type"`
+	Iterations int           `toml:"iterations" json:"iterations"`
+	Duration   time.Duration `toml:"duration" json:"duration"`
+	Threads    int           `toml:"threads" json:"threads" validate:"required,min=1"`
+	Pacing     time.Duration `toml:"pacing" json:"pacing"`
 }
 
 type OutputConfig struct {
-	ReportType string    `yaml:"report_type"`
-	ReportPath string    `yaml:"report_path"`
-	LogConfig  LogConfig `yaml:"log"`
+	ReportConfig *ReportConfig `toml:"report" json:"report"`
+	LogConfig    *LogConfig    `toml:"log" json:"log"`
+}
+
+type ReportConfig struct {
+	ToFile    bool `toml:"to_file" json:"to_file"`
+	ToConsole bool `toml:"to_console" json:"to_console"`
 }
 
 type LogConfig struct {
-	FileWriter    bool `yaml:"file_writer"`
-	ConsoleWriter bool `yaml:"console_writer"`
+	ToFile    bool `toml:"to_file" json:"to_file"`
+	ToConsole bool `toml:"to_console" json:"to_console"`
 }

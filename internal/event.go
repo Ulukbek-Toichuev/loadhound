@@ -11,10 +11,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 	"time"
 
-	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 	"github.com/fatih/color"
 	"github.com/rs/zerolog"
 	"github.com/schollz/progressbar/v3"
@@ -24,10 +22,9 @@ type GeneralEventController struct {
 	file *os.File
 	log  zerolog.Logger
 	bar  *progressbar.ProgressBar
-	mu   *sync.Mutex
 }
 
-func NewGeneralEventController(bar *progressbar.ProgressBar, toConsole, toFile bool, filename string) (*GeneralEventController, error) {
+func NewGeneralEventController(bar *progressbar.ProgressBar, toConsole, toFile bool) (*GeneralEventController, error) {
 	var writers []io.Writer
 
 	if toConsole {
@@ -38,7 +35,7 @@ func NewGeneralEventController(bar *progressbar.ProgressBar, toConsole, toFile b
 	var f *os.File
 	if toFile {
 		var err error
-		f, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, err = os.OpenFile(getLogFilename(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file: %w", err)
 		}
@@ -50,7 +47,19 @@ func NewGeneralEventController(bar *progressbar.ProgressBar, toConsole, toFile b
 	multiWriter := zerolog.MultiLevelWriter(writers...)
 	logger := zerolog.New(multiWriter).With().Timestamp().Logger()
 
-	return &GeneralEventController{log: logger, file: f, bar: bar, mu: &sync.Mutex{}}, nil
+	return &GeneralEventController{log: logger, file: f, bar: bar}, nil
+}
+
+func getLogFilename() string {
+	return fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
+}
+
+func (g *GeneralEventController) WriteWelcomeMsg(cfg *WorkflowConfig) {
+	if cfg.Duration > 0 {
+		g.log.Info().Str("type", cfg.Type).Int("threads", cfg.Threads).Str("duration", cfg.Duration.String()).Str("pacing", cfg.Pacing.String()).Msg("start test with config")
+	} else if cfg.Iterations > 0 {
+		g.log.Info().Str("type", cfg.Type).Int("threads", cfg.Threads).Int("iterations", cfg.Iterations).Str("pacing", cfg.Pacing.String()).Msg("start test with config")
+	}
 }
 
 func (g *GeneralEventController) WriteInfoMsg(msg string) {
@@ -66,56 +75,40 @@ func (g *GeneralEventController) WriteErrMsg(msg string, err error) {
 }
 
 func (g *GeneralEventController) WriteInfoMsgWithBar(msg string) {
-	g.mu.Lock()
-
 	g.bar.Clear()
 	g.log.Info().Msg(msg)
 	g.bar.RenderBlank()
-
-	g.mu.Unlock()
 }
 
 func (g *GeneralEventController) WriteWarnMsgWithBar(msg string) {
-	g.mu.Lock()
-
 	g.bar.Clear()
 	g.log.Warn().Msg(msg)
 	g.bar.RenderBlank()
-
-	g.mu.Unlock()
 }
 
 func (g *GeneralEventController) WriteErrMsgWithBar(msg string, err error) {
-	g.mu.Lock()
-
 	g.bar.Clear()
 	g.log.Error().Err(err).Msg(msg)
 	g.bar.RenderBlank()
-
-	g.mu.Unlock()
 }
 
-func (g *GeneralEventController) WriteQueryStat(q *stat.QueryStat) {
-	g.mu.Lock()
-
+func (g *GeneralEventController) WriteQueryStat(q *QueryMetric) {
 	g.bar.Clear()
 	if q.Err != nil {
 		g.log.Err(q.Err).
-			Int("workerk-id", q.WorkerID).
-			Str("latency", q.Latency.String()).
+			Int("thread-id", q.ThreadID).
+			Str("latency", q.ResponseTime.String()).
 			Int64("affected-rows", q.AffectedRows).
 			Str("query", q.Query).Msg("send query")
 		g.bar.RenderBlank()
-		g.mu.Unlock()
 		return
 	}
 	g.log.Info().
-		Int("workerk-id", q.WorkerID).
-		Str("latency", q.Latency.String()).
+		Int("thread-id", q.ThreadID).
+		Str("latency", q.ResponseTime.String()).
 		Int64("affected-rows", q.AffectedRows).
 		Str("query", q.Query).Msg("send query")
 	g.bar.RenderBlank()
-	g.mu.Unlock()
 }
 
 func (g *GeneralEventController) Increment() {

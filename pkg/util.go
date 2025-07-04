@@ -10,10 +10,7 @@ package pkg
 import (
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"time"
-
-	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 
 	"github.com/common-nighthawk/go-figure"
 	"github.com/google/uuid"
@@ -21,26 +18,10 @@ import (
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-type DriverType string
-
-const (
-	Postgres DriverType = "postgres"
-	Mysql    DriverType = "mysql"
-	Unknown  DriverType = "unknown"
-)
-
-func GetDriverType(d string) DriverType {
-	switch d {
-	case string(Postgres):
-		return Postgres
-	case string(Mysql):
-		return Postgres
-	}
-	return Unknown
-}
+const Version string = "v0.0.1"
 
 func RandBool() bool {
-	return rand.IntN(1) == 1
+	return rand.IntN(2) == 1
 }
 
 func RandIntRange(min, max int) int {
@@ -71,41 +52,19 @@ func RandStringInRange(min, max int) string {
 	}
 	n := rand.IntN(max-min+1) + min
 	b := make([]byte, n)
-	for i := range b {
+	for i := 0; i < len(b); i++ {
 		b[i] = letters[rand.IntN(len(letters))]
 	}
 	return fmt.Sprintf("'%s'", string(b))
 }
 
 func GetTime() string {
-	t := time.Now().Format("2006-01-02 15:04:05.999999")
-	return fmt.Sprintf("'%s'", t)
+	return fmt.Sprintf("'%s'", time.Now().Format("2006-01-02 15:04:05.999999"))
 }
 
-func LogWrapper(msg string) {
-	fmt.Printf("==> %s\n", msg)
-}
-
-func PrintFatal(msg string, err error) {
-	fmt.Printf("%s: %v", msg, err)
-	os.Exit(1)
-}
-
-func PrintAsciiArtLogo() {
+func PrintBanner() {
 	myFigure := figure.NewColorFigure("LoadHound", "", "red", true)
 	myFigure.Print()
 
-	fmt.Printf("\nLoadHound — Relentless SQL load testing tool %s.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com\n\n", PrintVersion())
-}
-
-func MeasureLatency(query string, f func() (int64, error)) *stat.QueryStat {
-	start := time.Now()
-	count, err := f()
-	latency := time.Since(start)
-
-	return stat.NewQueryStat(latency, err, count, query)
-}
-
-func PrintVersion() string {
-	return "v0.0.1"
+	fmt.Printf("\nLoadHound — Relentless SQL load testing tool %s.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com\n\n", Version)
 }

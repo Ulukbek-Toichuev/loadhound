@@ -14,47 +14,32 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-	"text/template"
-	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/Ulukbek-Toichuev/loadhound/internal"
-	"github.com/Ulukbek-Toichuev/loadhound/internal/executor"
-	"github.com/Ulukbek-Toichuev/loadhound/internal/parse"
-	"github.com/Ulukbek-Toichuev/loadhound/internal/stat"
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/schollz/progressbar/v3"
-	"gopkg.in/yaml.v3"
 )
-
-var (
-	validate     *validator.Validate
-	generalEvent *internal.GeneralEventController
-)
-
-func init() {
-	validate = validator.New(validator.WithRequiredStructEnabled())
-}
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	defer stop()
+	globalCtx, globalStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer globalStop()
 
-	if err := Run(ctx); err != nil {
+	if err := Run(globalCtx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func Run(ctx context.Context) error {
-	runTest := internal.NewRunTestFlag()
-	version := internal.NewVersionFlag()
+func Run(globalCtx context.Context) error {
+	var runTestFlag string
+	var versionFlag bool
 
-	flag.StringVar(&runTest.Value, runTest.Name, runTest.DefaultValue, runTest.Description)
-	flag.BoolVar(&version.Value, version.Name, version.DefaultValue, version.Description)
+	flag.StringVar(&runTestFlag, "run-test", "", "Path to your *.yaml file for running simple test")
+	flag.BoolVar(&versionFlag, "version", false, "Get LoadHound current version")
 	flag.Usage = Usage
 	flag.Parse()
 
@@ -63,24 +48,27 @@ func Run(ctx context.Context) error {
 		return nil
 	}
 
-	if version.Value {
-		fmt.Printf("%s\n", pkg.PrintVersion())
+	if versionFlag {
+		fmt.Printf("%s\n", pkg.Version)
 		return nil
 	}
-	pkg.PrintAsciiArtLogo()
-	if runTest.Value == "" {
-		return fmt.Errorf("path to config file is empty")
+
+	pkg.PrintBanner()
+
+	// Read config from file
+	var runTestConfig internal.RunTestConfig
+	if err := readConfigFile(runTestFlag, &runTestConfig); err != nil {
+		return err
 	}
 
-	// Read config file
-	var runTestConfig internal.RunTestConfig
-	if err := readConfigFile(runTest.Value, &runTestConfig); err != nil {
+	// Validate config
+	if err := validateConfig(&runTestConfig); err != nil {
 		return err
 	}
 
 	// Init progress bar
 	barCfg := internal.ProgressBarConfig{
-		MaxValue:  getProgressBarMaxValue(&runTestConfig.TestConfig),
+		MaxValue:  getProgressBarMaxValue(runTestConfig.WorkflowConfig),
 		EnableBar: true,
 	}
 	bar := internal.NewProgressBar(barCfg)
@@ -88,102 +76,96 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("failed to init progress bar")
 	}
 
-	// Configure logger
-	g, err := getGeneralEventController(bar, runTestConfig.OutputConfig.LogConfig)
+	// Configure general event controller
+	g, err := getGeneralEventController(bar, runTestConfig.OutputConfig)
 	if err != nil {
 		return err
 	}
-	generalEvent = g
 
-	if runTestConfig.TestConfig.Type == "simple" {
-		if err := validateSimpleTest(&runTestConfig); err != nil {
-			return err
-		}
-		if err := simpleTestHandler(ctx, &runTestConfig); err != nil {
+	// Define workflow type and call appropriate handler
+	if runTestConfig.WorkflowConfig.Type == "simple" {
+		if err := simpleTestHandler(globalCtx, &runTestConfig, g); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func simpleTestHandler(ctx context.Context, runCfg *internal.RunTestConfig) error {
-	pQuery, tmpl, err := prepareQuery(runCfg.QueryTemplateConfig)
+func simpleTestHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g *internal.GeneralEventController) error {
+	defer g.Close()
+	pQuery, err := prepareQuery(cfg.QueryTemplateConfig)
 	if err != nil {
 		return err
 	}
 
-	executor, err := executor.BuildSimpleExecutor(ctx, runCfg, tmpl, pQuery.QueryType, generalEvent)
+	executor, err := internal.NewSimpleExecutor(globalCtx, cfg, pQuery, g)
 	if err != nil {
 		return err
 	}
-	return Start(ctx, executor)
-}
 
-func prepareQuery(qc internal.QueryTemplateConfig) (*parse.PreparedQuery, *template.Template, error) {
-	var rawSQL string
-	var pQuery *parse.PreparedQuery
-	var err error
-
-	switch {
-	case qc.PathToQuery != "":
-		pQuery, err = getSQLFromFile(qc.PathToQuery)
-		if err != nil {
-			return nil, nil, fmt.Errorf("loading SQL file: %w", err)
-		}
-		rawSQL = pQuery.RawSQL
-	case qc.InlineQuery != "":
-		pQuery = parse.IdentifyQuery(qc.InlineQuery)
-		rawSQL = pQuery.RawSQL
-	default:
-		return nil, nil, errors.New("either inline_query or path_to_query must be provided")
-	}
-
-	tmpl, err := parse.GetQueryTemplate(rawSQL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parsing SQL template: %w", err)
-	}
-	return pQuery, tmpl, nil
-}
-
-type Executor interface {
-	Run(ctx context.Context) *stat.Stat
-}
-
-func Start(ctx context.Context, exec Executor) error {
-	generalEvent.WriteInfoMsgWithBar("start test")
-	defer generalEvent.WriteInfoMsgWithBar("end test")
-
-	start := time.Now()
-	result := exec.Run(ctx)
-	end := time.Now()
-	if result == nil {
-		return errors.New("unexpected situation, stat pointer is null")
-	}
-
-	stat.PrintResultPretty(stat.GetReport(start, end, result))
+	// Call Start()
+	Start(globalCtx, executor, g, cfg)
 	return nil
 }
 
-func getGeneralEventController(bar *progressbar.ProgressBar, cfg internal.LogConfig) (*internal.GeneralEventController, error) {
-	filename := fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
-	g, err := internal.NewGeneralEventController(bar, cfg.ConsoleWriter, cfg.FileWriter, filename)
+func prepareQuery(q *internal.QueryTemplateConfig) (*internal.PreparedQuery, error) {
+	pQuery, err := internal.GetPreparedQuery(q.Template)
+	if err != nil {
+		return nil, err
+	}
+
+	if q.Name == "" {
+		q.Name = q.Template
+	}
+	tmpl, err := internal.GetQueryTemplate(q)
+	if err != nil {
+		return nil, err
+	}
+	pQuery.Tmpl = tmpl
+	return pQuery, nil
+}
+
+func Start(globalCtx context.Context, exec internal.Executor, g *internal.GeneralEventController, cfg *internal.RunTestConfig) {
+	g.WriteWelcomeMsg(cfg.WorkflowConfig)
+
+	// Run test
+	m := exec.Run(globalCtx)
+	g.WriteInfoMsgWithBar("end test")
+
+	err := internal.GenerateReport(cfg, m)
+	if err != nil {
+		g.WriteErrMsgWithBar("failed to generate report", err)
+	}
+}
+
+func getGeneralEventController(bar *progressbar.ProgressBar, cfg *internal.OutputConfig) (*internal.GeneralEventController, error) {
+	if cfg != nil {
+		if cfg.LogConfig != nil {
+			logCfg := cfg.LogConfig
+			g, err := internal.NewGeneralEventController(bar, logCfg.ToConsole, logCfg.ToFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to init general event controller")
+			}
+			return g, nil
+		}
+	}
+	g, err := internal.NewGeneralEventController(bar, false, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init general event controller")
 	}
 	return g, nil
 }
 
-func validateSimpleTest(runCfg *internal.RunTestConfig) error {
-	if err := validate.Struct(runCfg); err != nil {
+func validateConfig(cfg *internal.RunTestConfig) error {
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := validate.Struct(cfg); err != nil {
 		return err
 	}
 
-	pathToQuery := runCfg.QueryTemplateConfig.PathToQuery
-	inlineQuery := runCfg.QueryTemplateConfig.InlineQuery
-	iterations := runCfg.TestConfig.Iterations
-	duration := runCfg.TestConfig.Duration
+	iterations := cfg.WorkflowConfig.Iterations
+	duration := cfg.WorkflowConfig.Duration
 
-	if d := pkg.GetDriverType(runCfg.DbConfig.Driver); d == pkg.Unknown {
+	if d := internal.GetDriverType(cfg.DbConfig.Driver); d == internal.Unknown {
 		return errors.New("unknown driver")
 	}
 
@@ -195,32 +177,15 @@ func validateSimpleTest(runCfg *internal.RunTestConfig) error {
 		return errors.New("iterations and duration are mutually exclusive")
 	}
 
-	if pathToQuery == "" && inlineQuery == "" {
-		return errors.New("either query or sql-file must be set")
+	if cfg.WorkflowConfig.Threads > iterations {
+		return errors.New("threads count cannot be more than iterations count")
+
 	}
 
-	if pathToQuery != "" && inlineQuery != "" {
-		return errors.New("query and sql-file are mutually exclusive")
+	if duration > 0 && cfg.WorkflowConfig.Pacing > duration {
+		return errors.New("pacing cannot be more than test duration")
 	}
 	return nil
-}
-
-func getSQLFromFile(pathToFile string) (*parse.PreparedQuery, error) {
-	if !strings.HasSuffix(pathToFile, ".sql") {
-		return nil, errors.New("file is not a .sql file")
-	}
-	data, err := os.ReadFile(pathToFile)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("file from path is empty: %s", pathToFile)
-	}
-	pQuery, err := parse.GetPreparedQuery(string(data))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", "failed to get prepared query", err)
-	}
-	return pQuery, nil
 }
 
 func readConfigFile(path string, out interface{}) error {
@@ -228,32 +193,25 @@ func readConfigFile(path string, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	if err := yaml.Unmarshal(data, out); err != nil {
+	if err := toml.Unmarshal(data, out); err != nil {
 		return err
 	}
 	return nil
 }
 
-func getProgressBarMaxValue(cfg *internal.TestConfig) int {
-	switch {
-	case cfg.Iterations > 0:
+func getProgressBarMaxValue(cfg *internal.WorkflowConfig) int {
+	if cfg.Iterations > 0 {
 		return cfg.Iterations
-	case cfg.Pacing > 0 && cfg.Duration > 0:
-		return int(cfg.Duration/cfg.Pacing) * cfg.Workers
-	default:
-		return -1
+	} else if cfg.Pacing > 0 && cfg.Duration > 0 {
+		return int(cfg.Duration/cfg.Pacing) * cfg.Threads
 	}
+	return -1
 }
 
 func Usage() {
 	usage := `Usage of LoadHound:
-
-  -simple-test string
-      Path to your *.yaml file for running simple test
-
-  -extend-test string
-      Path to your *.yaml file for running extend test
-
+  -run-test string
+      Path to your *.toml file for running test
   -version
       Get LoadHound version
 `
