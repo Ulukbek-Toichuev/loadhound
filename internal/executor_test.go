@@ -8,62 +8,12 @@ Licensed under the MIT License.
 package internal
 
 import (
-	"reflect"
 	"testing"
 	"time"
 )
 
 // thresholdDelta — допустимая погрешность (например, 10 мс)
 const thresholdDelta = 10 * time.Millisecond
-
-func TestDistributeIterations(t *testing.T) {
-	tests := []struct {
-		name     string
-		total    int
-		threads  int
-		expected []int
-	}{
-		{
-			name:     "evenly divisible",
-			total:    10,
-			threads:  2,
-			expected: []int{5, 5},
-		},
-		{
-			name:     "not evenly divisible",
-			total:    10,
-			threads:  3,
-			expected: []int{4, 3, 3},
-		},
-		{
-			name:     "single thread",
-			total:    5,
-			threads:  1,
-			expected: []int{5},
-		},
-		{
-			name:     "more thread than iterations",
-			total:    3,
-			threads:  5,
-			expected: []int{1, 1, 1, 0, 0},
-		},
-		{
-			name:     "zero iterations",
-			total:    0,
-			threads:  3,
-			expected: []int{0, 0, 0},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := distributeIterations(tt.total, tt.threads)
-			if !reflect.DeepEqual(got, tt.expected) {
-				t.Errorf("distributeIterations(%d, %d) = %v, want %v", tt.total, tt.threads, got, tt.expected)
-			}
-		})
-	}
-}
 
 func TestPacing(t *testing.T) {
 	tests := []struct {

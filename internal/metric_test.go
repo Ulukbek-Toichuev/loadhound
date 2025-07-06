@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 )
 
 func BenchmarkAdd(b *testing.B) {
@@ -16,9 +14,9 @@ func BenchmarkAdd(b *testing.B) {
 	for i := 0; i < 10; i++ {
 		qm := &QueryMetric{
 			Query:        "SELECT * FROM tableA",
-			ResponseTime: time.Duration(pkg.RandIntRange(150, 500) * int(time.Millisecond)),
+			ResponseTime: time.Duration(RandIntRange(150, 500) * int(time.Millisecond)),
 			AffectedRows: rand.Int64N(10000),
-			Err:          nil,
+			Err:          fmt.Errorf("error from thread-%d", i),
 			ThreadID:     i,
 		}
 		name := fmt.Sprintf("QueryMetric from thread-id: %d", i)

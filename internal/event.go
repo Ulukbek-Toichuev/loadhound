@@ -18,6 +18,8 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+const defaultProgressBarWidth int = 30
+
 type GeneralEventController struct {
 	file *os.File
 	log  zerolog.Logger
@@ -133,7 +135,7 @@ type ProgressBarConfig struct {
 func NewProgressBar(barConfig ProgressBarConfig) *progressbar.ProgressBar {
 	width := barConfig.Width
 	if width <= 0 {
-		width = 15
+		width = defaultProgressBarWidth
 	}
 	title := color.New(color.FgWhite, color.Bold).SprintFunc()
 	desc := barConfig.Description

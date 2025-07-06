@@ -17,11 +17,11 @@ import (
 	"syscall"
 
 	"github.com/BurntSushi/toml"
-	"github.com/Ulukbek-Toichuev/loadhound/internal"
-	"github.com/Ulukbek-Toichuev/loadhound/pkg"
-
 	"github.com/go-playground/validator/v10"
 	"github.com/schollz/progressbar/v3"
+
+	"github.com/Ulukbek-Toichuev/loadhound/internal"
+	"github.com/Ulukbek-Toichuev/loadhound/pkg"
 )
 
 func main() {
@@ -93,7 +93,12 @@ func Run(globalCtx context.Context) error {
 
 func simpleTestHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g *internal.GeneralEventController) error {
 	defer g.Close()
-	pQuery, err := prepareQuery(cfg.QueryTemplateConfig)
+
+	var useStmt bool
+	if cfg.DbConfig.SQLConfig != nil {
+		useStmt = cfg.DbConfig.SQLConfig.UseStmt
+	}
+	pQuery, err := prepareQuery(cfg.WorkflowConfig.QueryTemplateConfig, useStmt)
 	if err != nil {
 		return err
 	}
@@ -108,7 +113,7 @@ func simpleTestHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g
 	return nil
 }
 
-func prepareQuery(q *internal.QueryTemplateConfig) (*internal.PreparedQuery, error) {
+func prepareQuery(q *internal.QueryTemplateConfig, useStmt bool) (*internal.PreparedQuery, error) {
 	pQuery, err := internal.GetPreparedQuery(q.Template)
 	if err != nil {
 		return nil, err
@@ -117,7 +122,7 @@ func prepareQuery(q *internal.QueryTemplateConfig) (*internal.PreparedQuery, err
 	if q.Name == "" {
 		q.Name = q.Template
 	}
-	tmpl, err := internal.GetQueryTemplate(q)
+	tmpl, err := internal.GetQueryTemplate(q, useStmt)
 	if err != nil {
 		return nil, err
 	}
@@ -132,8 +137,7 @@ func Start(globalCtx context.Context, exec internal.Executor, g *internal.Genera
 	m := exec.Run(globalCtx)
 	g.WriteInfoMsgWithBar("end test")
 
-	err := internal.GenerateReport(cfg, m)
-	if err != nil {
+	if err := internal.GenerateReport(cfg, m); err != nil {
 		g.WriteErrMsgWithBar("failed to generate report", err)
 	}
 }
@@ -175,11 +179,6 @@ func validateConfig(cfg *internal.RunTestConfig) error {
 
 	if iterations > 0 && duration > 0 {
 		return errors.New("iterations and duration are mutually exclusive")
-	}
-
-	if cfg.WorkflowConfig.Threads > iterations {
-		return errors.New("threads count cannot be more than iterations count")
-
 	}
 
 	if duration > 0 && cfg.WorkflowConfig.Pacing > duration {

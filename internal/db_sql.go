@@ -41,10 +41,7 @@ func NewSQLWrapper(globalCtx context.Context, dbCfg *DbConfig, tmpl *template.Te
 
 	// Set connection pool values
 	if dbCfg.SQLConfig != nil {
-		db.SetMaxOpenConns(dbCfg.SQLConfig.MaxOpenConnections)
-		db.SetMaxIdleConns(dbCfg.SQLConfig.MaxIdleConnections)
-		db.SetConnMaxLifetime(dbCfg.SQLConfig.ConnMaxLifeTime)
-		db.SetConnMaxIdleTime(dbCfg.SQLConfig.ConnMaxIdleTime)
+		setConnPoolParams(dbCfg.SQLConfig, db)
 	}
 
 	// Check connection to the database using ping()
@@ -57,12 +54,12 @@ func NewSQLWrapper(globalCtx context.Context, dbCfg *DbConfig, tmpl *template.Te
 	// All queries or execs should be run using stmt instance
 	// Instead of directly using db
 	if dbCfg.SQLConfig != nil && dbCfg.SQLConfig.UseStmt {
-		queryWithPlaceHolder, err := BuildQueryWithPlaceHolders(tmpl, dbCfg.Driver)
+		queryWithBinder, err := BuildQueryWithBinds(tmpl, dbCfg.Driver)
 		if err != nil {
 			db.Close()
 			return nil, fmt.Errorf("failed to get query with placeholders: %w", err)
 		}
-		stmt, err := db.Prepare(queryWithPlaceHolder)
+		stmt, err := db.PrepareContext(globalCtx, queryWithBinder)
 		if err != nil {
 			db.Close()
 			return nil, fmt.Errorf("failed to get prepared statement: %w", err)
@@ -70,6 +67,21 @@ func NewSQLWrapper(globalCtx context.Context, dbCfg *DbConfig, tmpl *template.Te
 		return &SQLWrapper{db: db, stmt: stmt, DriverType: GetDriverType(dbCfg.Driver)}, nil
 	}
 	return &SQLWrapper{db: db, DriverType: GetDriverType(dbCfg.Driver)}, nil
+}
+
+func setConnPoolParams(cfg *SQLConfig, db *sql.DB) {
+	if cfg.MaxOpenConnections > 0 {
+		db.SetMaxOpenConns(cfg.MaxOpenConnections)
+	}
+	if cfg.MaxIdleConnections > 0 {
+		db.SetMaxIdleConns(cfg.MaxIdleConnections)
+	}
+	if cfg.ConnMaxLifeTime > 0 {
+		db.SetConnMaxLifetime(cfg.ConnMaxLifeTime)
+	}
+	if cfg.ConnMaxLifeTime > 0 {
+		db.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
+	}
 }
 
 func GetDriverType(driver string) DriverType {
@@ -115,7 +127,7 @@ func (sw *SQLWrapper) QueryRowsWithLatency(globalCtx context.Context, query stri
 }
 
 func (sw *SQLWrapper) StmtExecWithLatency(globalCtx context.Context, args ...any) *QueryMetric {
-	return measureLatency(fmt.Sprintf("%v", args...), func() (int64, error) {
+	return measureLatency(fmt.Sprintf("%v", args), func() (int64, error) {
 		result, err := sw.stmt.ExecContext(globalCtx, args...)
 		if err != nil {
 			return 0, err

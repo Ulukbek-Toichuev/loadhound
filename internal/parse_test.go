@@ -71,7 +71,7 @@ LIMIT {{randIntRange 10 100}};
 
 func BenchmarkBuildQuery(b *testing.B) {
 	q := QueryTemplateConfig{Name: "benchmark query", Template: sqlTemplate}
-	tmpl, err := GetQueryTemplate(&q)
+	tmpl, err := GetQueryTemplate(&q, false)
 	if err != nil {
 		return
 	}

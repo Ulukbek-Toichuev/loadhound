@@ -1,3 +1,10 @@
+/*
+LoadHound — Relentless SQL load testing tool.
+Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
+
+Licensed under the MIT License.
+*/
+
 package internal
 
 import (
@@ -13,7 +20,7 @@ import (
 
 type ReportData struct {
 	RunTestConfig *RunTestConfig `json:"test_config"`
-	TestDuration  time.Duration  `json:"test_duration"`
+	TestDuration  string         `json:"test_duration"`
 	QueryData     *QueryData     `json:"query_data"`
 	IterationData *IterationData `json:"iteration_data"`
 	ThreadData    *ThreadData    `json:"thread_data"`
@@ -21,14 +28,15 @@ type ReportData struct {
 }
 
 type QueryData struct {
-	TotalCount int64  `json:"total"`
-	QPS        string `json:"qps"`
-	RespMin    string `json:"min"`
-	RespMax    string `json:"max"`
-	P50        string `json:"p50"`
-	P90        string `json:"p90"`
-	P95        string `json:"p95"`
-	ErrCount   int64  `json:"err_total"`
+	TotalCount   int64  `json:"total"`
+	QPS          string `json:"qps"`
+	RespMin      string `json:"min"`
+	RespMax      string `json:"max"`
+	P50          string `json:"p50"`
+	P90          string `json:"p90"`
+	P95          string `json:"p95"`
+	AffectedRows int64  `json:"affected_rows"`
+	ErrCount     int64  `json:"err_total"`
 }
 
 type IterationData struct {
@@ -51,16 +59,17 @@ func getReportData(cfg *RunTestConfig, metricEngine *MetricEngine) *ReportData {
 
 	return &ReportData{
 		RunTestConfig: cfg,
-		TestDuration:  time.Since(metricEngine.start.Load()),
+		TestDuration:  time.Since(metricEngine.start.Load()).String(),
 		QueryData: &QueryData{
-			TotalCount: totalQuery,
-			QPS:        fmt.Sprintf("%.2f", qps),
-			RespMin:    respMin.String(),
-			RespMax:    respMax.String(),
-			P50:        time.Duration(p50).String(),
-			P90:        time.Duration(p90).String(),
-			P95:        time.Duration(p95).String(),
-			ErrCount:   errTotal,
+			TotalCount:   totalQuery,
+			QPS:          fmt.Sprintf("%.2f", qps),
+			RespMin:      respMin.String(),
+			RespMax:      respMax.String(),
+			P50:          time.Duration(p50).String(),
+			P90:          time.Duration(p90).String(),
+			P95:          time.Duration(p95).String(),
+			AffectedRows: metricEngine.affectedRowsTotal.Load(),
+			ErrCount:     errTotal,
 		},
 		IterationData: &IterationData{
 			TotalCount: metricEngine.iterTotal.Load(),
@@ -98,13 +107,12 @@ func GenerateReport(cfg *RunTestConfig, metricEngine *MetricEngine) error {
 		if err != nil {
 			return err
 		}
+
 		f.Write(data)
-		err = f.Close()
-		if err != nil {
+		if err := f.Close(); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -118,11 +126,11 @@ func printColorReport(report *ReportData) {
 	cyan := color.New(color.FgCyan).SprintFunc()
 
 	fmt.Print(bold("\n========== LoadHound Report ==========\n"))
-	fmt.Printf("type: %s  duration: %s\n", cyan(report.RunTestConfig.WorkflowConfig.Type), cyan(report.TestDuration.String()))
+	fmt.Printf("type: %s  duration: %s\n", cyan(report.RunTestConfig.WorkflowConfig.Type), cyan(report.TestDuration))
 	fmt.Println()
 
 	fmt.Println(bold("Query"))
-	fmt.Printf("total: %s  failed: %s  qps: %s\n", cyan(report.QueryData.TotalCount), cyan(report.QueryData.ErrCount), cyan(report.QueryData.QPS))
+	fmt.Printf("total: %s  failed: %s  qps: %s  affected rows: %s\n", cyan(report.QueryData.TotalCount), cyan(report.QueryData.ErrCount), cyan(report.QueryData.QPS), cyan(report.QueryData.AffectedRows))
 	fmt.Printf("min: %s  max: %s\n", cyan(report.QueryData.RespMin), cyan(report.QueryData.RespMax))
 	fmt.Printf("p50: %s  p90: %s  p95: %s\n", cyan(report.QueryData.P50), cyan(report.QueryData.P90), cyan(report.QueryData.P95))
 	fmt.Println()

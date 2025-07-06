@@ -12,10 +12,9 @@ import (
 )
 
 type RunTestConfig struct {
-	DbConfig            *DbConfig            `toml:"db" json:"db" validate:"required"`
-	QueryTemplateConfig *QueryTemplateConfig `toml:"query_template" json:"query_tempalte" validate:"required"`
-	WorkflowConfig      *WorkflowConfig      `toml:"workflow" json:"workflow" validate:"required"`
-	OutputConfig        *OutputConfig        `toml:"output" json:"output"`
+	DbConfig       *DbConfig       `toml:"db" json:"db" validate:"required"`
+	WorkflowConfig *WorkflowConfig `toml:"workflow" json:"workflow" validate:"required"`
+	OutputConfig   *OutputConfig   `toml:"output" json:"output"`
 }
 
 type DbConfig struct {
@@ -38,11 +37,12 @@ type QueryTemplateConfig struct {
 }
 
 type WorkflowConfig struct {
-	Type       string        `toml:"type" json:"type"`
-	Iterations int           `toml:"iterations" json:"iterations"`
-	Duration   time.Duration `toml:"duration" json:"duration"`
-	Threads    int           `toml:"threads" json:"threads" validate:"required,min=1"`
-	Pacing     time.Duration `toml:"pacing" json:"pacing"`
+	Type                string               `toml:"type" json:"type"`
+	Iterations          int                  `toml:"iterations" json:"iterations"`
+	Duration            time.Duration        `toml:"duration" json:"duration"`
+	Threads             int                  `toml:"threads" json:"threads" validate:"required,min=1"`
+	Pacing              time.Duration        `toml:"pacing" json:"pacing"`
+	QueryTemplateConfig *QueryTemplateConfig `toml:"query_template" json:"query_tempalte" validate:"required"`
 }
 
 type OutputConfig struct {

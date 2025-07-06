@@ -30,29 +30,33 @@ type QueryMetric struct {
 }
 
 type MetricEngine struct {
-	td            *TDigestWrapper
-	start         atomic.Time
-	curr          atomic.Time
-	qps           atomic.Float64
-	queryTotal    atomic.Int64
-	iterTotal     atomic.Int64
-	threadsTotal  atomic.Int64
-	threadsFailed atomic.Int64
-	errTotal      atomic.Int64
-	respMin       atomic.Duration
-	respMax       atomic.Duration
-	respTotal     atomic.Duration
-	errMap        sync.Map
+	td                *TDigestWrapper
+	start             atomic.Time
+	curr              atomic.Time
+	qps               atomic.Float64
+	affectedRowsTotal atomic.Int64
+	queryTotal        atomic.Int64
+	iterTotal         atomic.Int64
+	threadsTotal      atomic.Int64
+	threadsFailed     atomic.Int64
+	errTotal          atomic.Int64
+	respMin           atomic.Duration
+	respMax           atomic.Duration
+	respTotal         atomic.Duration
+	errMap            sync.Map
 }
 
 func NewMetricEngine(compression float64) *MetricEngine {
 	var m MetricEngine
 	m.td = NewTDigestWrapper(compression)
-	m.start.Store(time.Now())
-	m.curr.Store(time.Now())
 	m.respMin.Store(defaultRespMin)
 	m.respMax.Store(defaultRespMax)
 	return &m
+}
+
+func (m *MetricEngine) Activate() {
+	m.start.Store(time.Now())
+	m.curr.Store(time.Now())
 }
 
 func (m *MetricEngine) AddFailedThread() {
@@ -73,6 +77,7 @@ func (m *MetricEngine) AddQueryMetric(q *QueryMetric) {
 		m.errTotal.Add(1)
 	}
 	m.respTotal.Add(q.ResponseTime)
+	m.affectedRowsTotal.Add(q.AffectedRows)
 
 	for {
 		respMinOld := m.respMin.Load()
@@ -111,7 +116,7 @@ func (m *MetricEngine) AddQueryMetric(q *QueryMetric) {
 	now := time.Now()
 	m.curr.Store(now)
 
-	// Get QPS = TotalQueries / TotalDuration
+	// Calculate QPS = TotalQueries / TotalDuration
 	dur := now.Sub(m.start.Load())
 	if dur.Seconds() > 0 {
 		m.qps.Store(float64(m.queryTotal.Load()) / dur.Seconds())
