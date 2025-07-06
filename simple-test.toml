@@ -1,7 +1,7 @@
 # Database connection settings (required)
 [db]
 driver="postgres"
-dsn="postgres://postgres:Rewq_1234@185.121.233.53:5432/loadhound_db?sslmode=disable"
+dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 
 # optional parameters; if omitted, driver defaults are used
 # use prepared statements (optional; defaults to false)
