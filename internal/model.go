@@ -39,15 +39,16 @@ type QueryTemplateConfig struct {
 type WorkflowConfig struct {
 	Type                string               `toml:"type" json:"type"`
 	Iterations          int                  `toml:"iterations" json:"iterations"`
-	Duration            time.Duration        `toml:"duration" json:"duration"`
+	Duration            time.Duration        `toml:"duration" json:"duration,string"`
 	Threads             int                  `toml:"threads" json:"threads" validate:"required,min=1"`
-	Pacing              time.Duration        `toml:"pacing" json:"pacing"`
+	Pacing              time.Duration        `toml:"pacing" json:"pacing,string"`
 	QueryTemplateConfig *QueryTemplateConfig `toml:"query_template" json:"query_tempalte" validate:"required"`
 }
 
 type OutputConfig struct {
-	ReportConfig *ReportConfig `toml:"report" json:"report"`
-	LogConfig    *LogConfig    `toml:"log" json:"log"`
+	ReportConfig   *ReportConfig   `toml:"report" json:"report"`
+	LogConfig      *LogConfig      `toml:"log" json:"log"`
+	InfluxDBConfig *InfluxDBConfig `toml:"influx_db" json:"influxdb"`
 }
 
 type ReportConfig struct {
@@ -58,4 +59,13 @@ type ReportConfig struct {
 type LogConfig struct {
 	ToFile    bool `toml:"to_file" json:"to_file"`
 	ToConsole bool `toml:"to_console" json:"to_console"`
+}
+
+type InfluxDBConfig struct {
+	Bucket  string        `toml:"bucket"`
+	Org     string        `toml:"org"`
+	Token   string        `toml:"token"`
+	Url     string        `toml:"url"`
+	Period  time.Duration `toml:"period" json:"period,string"`
+	TimeOut time.Duration `toml:"timeout" json:"timeout,string"`
 }

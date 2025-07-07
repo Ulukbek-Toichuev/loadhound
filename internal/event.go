@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/fatih/color"
@@ -24,6 +25,7 @@ type GeneralEventController struct {
 	file *os.File
 	log  zerolog.Logger
 	bar  *progressbar.ProgressBar
+	mu   *sync.Mutex
 }
 
 func NewGeneralEventController(bar *progressbar.ProgressBar, toConsole, toFile bool) (*GeneralEventController, error) {
@@ -49,7 +51,7 @@ func NewGeneralEventController(bar *progressbar.ProgressBar, toConsole, toFile b
 	multiWriter := zerolog.MultiLevelWriter(writers...)
 	logger := zerolog.New(multiWriter).With().Timestamp().Logger()
 
-	return &GeneralEventController{log: logger, file: f, bar: bar}, nil
+	return &GeneralEventController{log: logger, file: f, bar: bar, mu: &sync.Mutex{}}, nil
 }
 
 func getLogFilename() string {
@@ -95,6 +97,8 @@ func (g *GeneralEventController) WriteErrMsgWithBar(msg string, err error) {
 }
 
 func (g *GeneralEventController) WriteQueryStat(q *QueryMetric) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.bar.Clear()
 	if q.Err != nil {
 		g.log.Err(q.Err).
@@ -111,6 +115,7 @@ func (g *GeneralEventController) WriteQueryStat(q *QueryMetric) {
 		Int64("affected-rows", q.AffectedRows).
 		Str("query", q.Query).Msg("send query")
 	g.bar.RenderBlank()
+	g.bar.Add(1)
 }
 
 func (g *GeneralEventController) Increment() {

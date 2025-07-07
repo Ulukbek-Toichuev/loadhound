@@ -24,7 +24,7 @@ go.work.sum
 # env file
 .env
 
-simple-test.yml
+simple-test.toml
 
 *.log
 

@@ -114,11 +114,7 @@ func simpleTestHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g
 }
 
 func prepareQuery(q *internal.QueryTemplateConfig, useStmt bool) (*internal.PreparedQuery, error) {
-	pQuery, err := internal.GetPreparedQuery(q.Template)
-	if err != nil {
-		return nil, err
-	}
-
+	pQuery := internal.IdentifyQuery(q.Template)
 	if q.Name == "" {
 		q.Name = q.Template
 	}
@@ -200,7 +196,7 @@ func readConfigFile(path string, out interface{}) error {
 
 func getProgressBarMaxValue(cfg *internal.WorkflowConfig) int {
 	if cfg.Iterations > 0 {
-		return cfg.Iterations
+		return cfg.Iterations * cfg.Threads
 	} else if cfg.Pacing > 0 && cfg.Duration > 0 {
 		return int(cfg.Duration/cfg.Pacing) * cfg.Threads
 	}

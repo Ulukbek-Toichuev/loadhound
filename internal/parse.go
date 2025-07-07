@@ -18,71 +18,54 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-type QueryType int
-
 const (
-	QueryTypeUnknown QueryType = iota
-	QueryTypeExec
-	QueryTypeRead
+	TypeExec    string = "typeExec"
+	TypeQuery   string = "typeQuery"
+	TypeUnknown string = "typeUnknown"
 )
 
-func (qt QueryType) String() string {
-	switch qt {
-	case QueryTypeExec:
-		return "exec"
-	case QueryTypeRead:
-		return "query"
-	default:
-		return "unknown"
-	}
-}
-
 type PreparedQuery struct {
-	RawSQL    string
-	QueryType string
-	Tmpl      *template.Template
+	RawSQL string
+	Type   string
+	Tmpl   *template.Template
 }
 
 func NewPreparedQuery(sql string, queryType string) *PreparedQuery {
-	return &PreparedQuery{RawSQL: sql, QueryType: queryType}
-}
-
-func GetPreparedQuery(query string) (*PreparedQuery, error) {
-	return IdentifyQuery(query), nil
+	return &PreparedQuery{RawSQL: sql, Type: queryType}
 }
 
 func IdentifyQuery(sql string) *PreparedQuery {
 	upper := strings.ToUpper(sql)
-	switch {
-	case strings.HasPrefix(upper, "INSERT"),
-		strings.HasPrefix(upper, "UPDATE"),
-		strings.HasPrefix(upper, "DELETE"):
-		return NewPreparedQuery(sql, QueryTypeExec.String())
-
-	case strings.HasPrefix(upper, "SELECT"),
-		strings.HasPrefix(upper, "WITH"):
-		return NewPreparedQuery(sql, QueryTypeRead.String())
-
-	default:
-		return NewPreparedQuery(sql, QueryTypeUnknown.String())
+	if strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE") || strings.HasPrefix(upper, "DELETE") {
+		return NewPreparedQuery(sql, TypeExec)
+	} else if strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH") {
+		return NewPreparedQuery(sql, TypeQuery)
 	}
+	return NewPreparedQuery(sql, TypeUnknown)
 }
 
 func GetQueryTemplate(queryTemplate *QueryTemplateConfig, useStmt bool) (*template.Template, error) {
 	var tmpl *template.Template
-
 	if useStmt {
 		tmpl = template.New(queryTemplate.Name).Funcs(template.FuncMap{
-			"randBool":       func() string { return "?" },
-			"randIntRange":   func(min, max int) string { return "?" },
-			"randFloatRange": func(min, max float64) string { return "?" },
-			"randUUID":       func() string { return "?" },
-			"randStrRange":   func(min, max int) string { return "?" },
-			"getCurrTime":    func() string { return "?" },
-			"setBind":        func() string { return "?" },
+			"randBool":        func() string { return "?" },
+			"randIntRange":    func(min, max int) string { return "?" },
+			"randFloatRange":  func(min, max float64) string { return "?" },
+			"randUUID":        func() string { return "?" },
+			"randStrRange":    func(min, max int) string { return "?" },
+			"GetTimestampNow": func() string { return "?" },
+			"setBind":         func() string { return "?" },
 		})
 	} else {
-		tmpl = template.New(queryTemplate.Name).Funcs(getFuncMap())
+		tmpl = template.New(queryTemplate.Name).Funcs(template.FuncMap{
+			"randBool":        RandBool,
+			"randIntRange":    RandIntRange,
+			"randFloatRange":  RandFloat64InRange,
+			"randUUID":        func() string { return fmt.Sprintf("'%s'", RandUUID()) },
+			"randStrRange":    func(min, max int) string { return fmt.Sprintf("'%s'", RandStringInRange(min, max)) },
+			"GetTimestampNow": func() string { return fmt.Sprintf("'%s'", GetTimestampNow()) },
+			"setBind":         func() string { return "?" },
+		})
 	}
 	tmpl, err := tmpl.Parse(queryTemplate.Template)
 	if err != nil {
@@ -123,7 +106,7 @@ var reFuncPattern = regexp.MustCompile(`\{\{\s*(.*?)\s*\}\}`)
 
 // Return slice with Func structs from SQL query:
 // [{randIntRange [5 10]} {randBool []}]
-func GetFuncs(query string) []Func {
+func GetFuncsName(query string) []Func {
 	var funcs []Func
 	if len(query) == 0 {
 		return funcs
@@ -136,18 +119,13 @@ func GetFuncs(query string) []Func {
 		}
 
 		content := strings.TrimSpace(match[1])
-
-		// Защита: запрещаем вложенные фигурные скобки внутри
 		if strings.Contains(content, "{{") || strings.Contains(content, "}}") {
-			continue // Игнорируем некорректный шаблон
+			continue
 		}
-
-		// Разбиваем содержимое по токенам
 		tokens := strings.Fields(content)
 		if len(tokens) == 0 {
 			continue
 		}
-
 		funcs = append(funcs, Func{
 			Name: tokens[0],
 			Args: tokens[1:],
@@ -213,13 +191,13 @@ func CollectFuncs(funcs []Func) ([]func() interface{}, error) {
 
 func getFuncMap() map[string]any {
 	return template.FuncMap{
-		"randBool":       RandBool,
-		"randIntRange":   RandIntRange,
-		"randFloatRange": RandFloat64InRange,
-		"randUUID":       RandUUID,
-		"randStrRange":   RandStringInRange,
-		"getCurrTime":    GetTime,
-		"setBind":        func() string { return "?" },
+		"randBool":        RandBool,
+		"randIntRange":    RandIntRange,
+		"randFloatRange":  RandFloat64InRange,
+		"randUUID":        RandUUID,
+		"randStrRange":    RandStringInRange,
+		"GetTimestampNow": GetTimestampNow,
+		"setBind":         func() string { return "?" },
 	}
 }
 

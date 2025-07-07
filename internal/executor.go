@@ -24,7 +24,7 @@ type SimpleExecutor struct {
 	cfg        *RunTestConfig
 	genEvent   *GeneralEventController
 	pQuery     *PreparedQuery
-	pStmtFuncs []func() interface{}
+	paramFuncs []func() interface{}
 }
 
 func NewSimpleExecutor(globalCtx context.Context, cfg *RunTestConfig, pQuery *PreparedQuery, g *GeneralEventController) (*SimpleExecutor, error) {
@@ -33,12 +33,12 @@ func NewSimpleExecutor(globalCtx context.Context, cfg *RunTestConfig, pQuery *Pr
 		return nil, err
 	}
 	if db.stmt != nil {
-		funcs := GetFuncs(pQuery.RawSQL)
-		pStmtFuncs, err := CollectFuncs(funcs)
+		funcs := GetFuncsName(pQuery.RawSQL)
+		paramFuncs, err := CollectFuncs(funcs)
 		if err != nil {
 			return nil, err
 		}
-		return &SimpleExecutor{db: db, cfg: cfg, genEvent: g, pQuery: pQuery, pStmtFuncs: pStmtFuncs}, nil
+		return &SimpleExecutor{db: db, cfg: cfg, genEvent: g, pQuery: pQuery, paramFuncs: paramFuncs}, nil
 	}
 	return &SimpleExecutor{db: db, cfg: cfg, genEvent: g, pQuery: pQuery}, nil
 }
@@ -47,19 +47,17 @@ func (s *SimpleExecutor) Run(globalCtx context.Context) *MetricEngine {
 	var (
 		metricEngine = NewMetricEngine(1000)
 		workflowCfg  = s.cfg.WorkflowConfig
-		wg           = &sync.WaitGroup{}
-		barrier      = NewBarrier(workflowCfg.Threads)
+		wg           = sync.WaitGroup{}
 	)
-
 	wg.Add(workflowCfg.Threads)
 	threadSlice := make([]*Thread, workflowCfg.Threads)
 	for idx := range workflowCfg.Threads {
-		fn := getQueryFunc(s.db, s.pQuery, s.pStmtFuncs)
+		fn := getTask(s.db, s.pQuery, s.paramFuncs)
 		if fn == nil {
-			s.genEvent.WriteErrMsg("query func is nil", fmt.Errorf("failed to create new thread"))
+			s.genEvent.WriteErrMsg("task is nil", fmt.Errorf("failed to create new thread"))
 			continue
 		}
-		threadSlice[idx] = NewThread(idx, wg, metricEngine, barrier, workflowCfg.Pacing, s.pQuery.Tmpl, s.genEvent, fn)
+		threadSlice[idx] = NewThread(idx, &wg, metricEngine, workflowCfg.Pacing, s.pQuery.Tmpl, s.genEvent, fn)
 	}
 
 	if workflowCfg.Duration > 0 {
@@ -85,138 +83,138 @@ type Thread struct {
 	id           int
 	wg           *sync.WaitGroup
 	metricEngine *MetricEngine
-	barrier      *Barrier
 	pacing       time.Duration
 	tmpl         *template.Template
 	genEvent     *GeneralEventController
-	queryFunc    func(globalCtx context.Context) *QueryMetric
+	task         func(globalCtx context.Context) *QueryMetric
 	once         sync.Once
 }
 
 func NewThread(id int,
 	wg *sync.WaitGroup,
 	metricEngine *MetricEngine,
-	barrier *Barrier,
 	pacing time.Duration,
 	tmpl *template.Template,
 	genEvent *GeneralEventController,
-	queryFunc func(globalCtx context.Context) *QueryMetric) *Thread {
+	task func(globalCtx context.Context) *QueryMetric) *Thread {
 	// Increase active thread in metric engine
 	metricEngine.AddThread()
 	return &Thread{
 		id:           id,
 		wg:           wg,
 		metricEngine: metricEngine,
-		barrier:      barrier,
 		pacing:       pacing,
 		tmpl:         tmpl,
 		genEvent:     genEvent,
-		queryFunc:    queryFunc,
+		task:         task,
 	}
 }
 
 func (t *Thread) ExecByDur(ctx context.Context) {
 	defer t.wg.Done()
-	t.barrier.Touch()
 	t.once.Do(t.metricEngine.Activate)
 	for {
 		select {
 		case <-ctx.Done():
-			t.metricEngine.AddFailedThread()
+			t.genEvent.WriteErrMsg(fmt.Sprintf("thread %d end work", t.id), ctx.Err())
 			return
 		default:
 		}
-		err := t.exec(ctx)
+		start := time.Now()
+		metric, err := t.exec(ctx)
 		if err != nil {
 			t.metricEngine.AddFailedThread()
 			t.genEvent.WriteErrMsgWithBar(fmt.Sprintf("thread-%d prematurely end work, get error", t.id), err)
 			return
 		}
-		t.metricEngine.AddIter()
+
+		// Write to log query metric
+		metric.ThreadID = t.id
+		t.genEvent.WriteQueryStat(metric)
+
+		// Submit metrics about query
+		t.metricEngine.AddQueryMetric(metric)
+
+		// Set pacing
+		pacing(start, t.pacing)
 	}
 }
 
 func (t *Thread) ExecByIter(ctx context.Context, iter int) {
 	defer t.wg.Done()
-	t.barrier.Touch()
 	t.once.Do(t.metricEngine.Activate)
 	for range iter {
 		select {
 		case <-ctx.Done():
-			t.metricEngine.AddFailedThread()
+			t.genEvent.WriteErrMsg(fmt.Sprintf("thread %d end work", t.id), ctx.Err())
 			return
 		default:
 		}
-		err := t.exec(ctx)
+		start := time.Now()
+		metric, err := t.exec(ctx)
 		if err != nil {
 			t.metricEngine.AddFailedThread()
 			t.genEvent.WriteErrMsgWithBar(fmt.Sprintf("thread-%d prematurely end work, get error", t.id), err)
 			return
 		}
+		// Write to log query metric
+		metric.ThreadID = t.id
+		t.genEvent.WriteQueryStat(metric)
 
-		t.metricEngine.AddIter()
+		// Submit metrics about query
+		t.metricEngine.AddQueryMetric(metric)
+
+		// Set pacing
+		pacing(start, t.pacing)
 	}
 }
 
-func (t *Thread) exec(ctx context.Context) error {
+func (t *Thread) exec(ctx context.Context) (*QueryMetric, error) {
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
-	start := time.Now()
-	metric := t.queryFunc(ctx)
-
-	// Write to log query metric and increment progress bar
-	t.genEvent.WriteQueryStat(metric)
-	t.genEvent.Increment()
-
-	// Set pacing
-	pacing(start, t.pacing)
-
-	// Submit metrics about query
-	t.metricEngine.AddQueryMetric(metric)
-	return nil
+	return t.task(ctx), nil
 }
 
-func getArgs(pStmtFuncs []func() interface{}) []interface{} {
+func getArgs(paramFuncs []func() interface{}) []interface{} {
 	result := make([]interface{}, 0)
-	for _, fn := range pStmtFuncs {
+	for _, fn := range paramFuncs {
 		result = append(result, fn())
 	}
 	return result
 }
 
-func getQueryFunc(db *SQLWrapper, pQuery *PreparedQuery, pStmtFuncs []func() interface{}) func(globalCtx context.Context) *QueryMetric {
+func getTask(db *SQLWrapper, pQuery *PreparedQuery, pStmtFuncs []func() interface{}) func(globalCtx context.Context) *QueryMetric {
 	if db.stmt != nil {
-		if pQuery.QueryType == QueryTypeExec.String() {
+		if pQuery.Type == TypeExec {
 			return func(globalCtx context.Context) *QueryMetric {
 				args := getArgs(pStmtFuncs)
-				return db.StmtExecWithLatency(globalCtx, args...)
+				return db.StmtExec(globalCtx, args...)
 			}
-		} else if pQuery.QueryType == QueryTypeRead.String() {
+		} else if pQuery.Type == TypeQuery {
 			return func(globalCtx context.Context) *QueryMetric {
 				args := getArgs(pStmtFuncs)
-				return db.StmtQueryRowsWithLatency(globalCtx, args...)
+				return db.StmtQuery(globalCtx, args...)
 			}
 		}
 	} else {
-		if pQuery.QueryType == QueryTypeExec.String() {
+		if pQuery.Type == TypeExec {
 			return func(globalCtx context.Context) *QueryMetric {
 				query, err := BuildQuery(pQuery.Tmpl)
 				if err != nil {
 					return nil
 				}
-				return db.ExecWithLatency(globalCtx, query)
+				return db.Exec(globalCtx, query)
 			}
-		} else if pQuery.QueryType == QueryTypeRead.String() {
+		} else if pQuery.Type == TypeQuery {
 			return func(globalCtx context.Context) *QueryMetric {
 				query, err := BuildQuery(pQuery.Tmpl)
 				if err != nil {
 					return nil
 				}
-				return db.QueryRowsWithLatency(globalCtx, query)
+				return db.Query(globalCtx, query)
 			}
 		}
-
 	}
 	return nil
 }
@@ -226,32 +224,11 @@ func pacing(start time.Time, pacing time.Duration) {
 		return
 	}
 	elapsed := time.Since(start)
+	if elapsed >= pacing {
+		return
+	}
 	remaining := pacing - elapsed
 	if remaining > 0 {
 		time.Sleep(remaining)
 	}
-}
-
-type Barrier struct {
-	n    int
-	cond *sync.Cond
-}
-
-func NewBarrier(n int) *Barrier {
-	b := &Barrier{n: n}
-	b.cond = sync.NewCond(&sync.Mutex{})
-	return b
-}
-
-func (b *Barrier) Touch() {
-	b.cond.L.Lock()
-	defer b.cond.L.Unlock()
-	if b.n == 0 {
-		return
-	}
-	b.n--
-	for b.n > 0 {
-		b.cond.Wait()
-	}
-	b.cond.Broadcast()
 }

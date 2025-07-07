@@ -41,7 +41,7 @@ func RandUUID() string {
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("'%s'", u.String())
+	return u.String()
 }
 
 func RandStringInRange(min, max int) string {
@@ -56,7 +56,7 @@ func RandStringInRange(min, max int) string {
 	for i := 0; i < len(b); i++ {
 		b[i] = letters[rand.IntN(len(letters))]
 	}
-	return fmt.Sprintf("'%s'", string(b))
+	return string(b)
 }
 
 func ValidateIntArgs(arg1, arg2 int) error {
@@ -73,6 +73,6 @@ func ValidateIntArgs(arg1, arg2 int) error {
 	return nil
 }
 
-func GetTime() string {
+func GetTimestampNow() string {
 	return fmt.Sprintf("'%s'", time.Now().Format("2006-01-02 15:04:05.999999"))
 }

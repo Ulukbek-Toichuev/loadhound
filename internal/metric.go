@@ -67,11 +67,8 @@ func (m *MetricEngine) AddThread() {
 	m.threadsTotal.Add(1)
 }
 
-func (m *MetricEngine) AddIter() {
-	m.iterTotal.Add(1)
-}
-
 func (m *MetricEngine) AddQueryMetric(q *QueryMetric) {
+	m.iterTotal.Add(1)
 	m.queryTotal.Add(1)
 	if q.Err != nil {
 		m.errTotal.Add(1)

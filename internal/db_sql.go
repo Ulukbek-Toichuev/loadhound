@@ -79,7 +79,7 @@ func setConnPoolParams(cfg *SQLConfig, db *sql.DB) {
 	if cfg.ConnMaxLifeTime > 0 {
 		db.SetConnMaxLifetime(cfg.ConnMaxLifeTime)
 	}
-	if cfg.ConnMaxLifeTime > 0 {
+	if cfg.ConnMaxIdleTime > 0 {
 		db.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 	}
 }
@@ -106,7 +106,7 @@ func (sw *SQLWrapper) Close() error {
 	return sw.db.Close()
 }
 
-func (sw *SQLWrapper) ExecWithLatency(globalCtx context.Context, query string) *QueryMetric {
+func (sw *SQLWrapper) Exec(globalCtx context.Context, query string) *QueryMetric {
 	return measureLatency(query, func() (int64, error) {
 		result, err := sw.db.ExecContext(globalCtx, query)
 		if err != nil {
@@ -116,7 +116,7 @@ func (sw *SQLWrapper) ExecWithLatency(globalCtx context.Context, query string) *
 	})
 }
 
-func (sw *SQLWrapper) QueryRowsWithLatency(globalCtx context.Context, query string) *QueryMetric {
+func (sw *SQLWrapper) Query(globalCtx context.Context, query string) *QueryMetric {
 	return measureLatency(query, func() (int64, error) {
 		rows, err := sw.db.QueryContext(globalCtx, query)
 		if err != nil {
@@ -126,7 +126,7 @@ func (sw *SQLWrapper) QueryRowsWithLatency(globalCtx context.Context, query stri
 	})
 }
 
-func (sw *SQLWrapper) StmtExecWithLatency(globalCtx context.Context, args ...any) *QueryMetric {
+func (sw *SQLWrapper) StmtExec(globalCtx context.Context, args ...any) *QueryMetric {
 	return measureLatency(fmt.Sprintf("%v", args), func() (int64, error) {
 		result, err := sw.stmt.ExecContext(globalCtx, args...)
 		if err != nil {
@@ -136,8 +136,8 @@ func (sw *SQLWrapper) StmtExecWithLatency(globalCtx context.Context, args ...any
 	})
 }
 
-func (sw *SQLWrapper) StmtQueryRowsWithLatency(globalCtx context.Context, args ...any) *QueryMetric {
-	return measureLatency(fmt.Sprintf("%v", args...), func() (int64, error) {
+func (sw *SQLWrapper) StmtQuery(globalCtx context.Context, args ...any) *QueryMetric {
+	return measureLatency(fmt.Sprintf("%v", args), func() (int64, error) {
 		rows, err := sw.stmt.QueryContext(globalCtx, args...)
 		if err != nil {
 			return 0, err
@@ -149,11 +149,11 @@ func (sw *SQLWrapper) StmtQueryRowsWithLatency(globalCtx context.Context, args .
 func countRows(rows *sql.Rows) (int64, error) {
 	defer rows.Close()
 	var count int64
-	if err := rows.Err(); err != nil {
-		return count, err
-	}
 	for rows.Next() {
 		count++
+	}
+	if err := rows.Err(); err != nil {
+		return count, err
 	}
 	return count, nil
 }
@@ -161,7 +161,5 @@ func countRows(rows *sql.Rows) (int64, error) {
 func measureLatency(query string, f func() (int64, error)) *QueryMetric {
 	start := time.Now()
 	count, err := f()
-	respTime := time.Since(start)
-
-	return &QueryMetric{Query: query, ResponseTime: respTime, AffectedRows: count, Err: err}
+	return &QueryMetric{Query: query, ResponseTime: time.Since(start), AffectedRows: count, Err: err}
 }

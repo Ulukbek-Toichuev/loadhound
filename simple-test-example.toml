@@ -1,6 +1,7 @@
 # Database connection settings (required)
 [db]
 driver="postgres"
+dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 
 # optional parameters; if omitted, driver defaults are used
 # use prepared statements (optional; defaults to false)
@@ -9,7 +10,7 @@ max_open_connections=2
 max_idle_connections=2
 # conn_max_idle_time="1m"
 # conn_max_lifetime="10m"
-# use_prepared_statements=true
+use_prepared_statements=true
 
 # Workflow configuration
 # type required parameters (options: simple, extend)
@@ -18,15 +19,18 @@ max_idle_connections=2
 [workflow]
 type="simple"
 # iterations=2
-duration="10s"
-threads=10 # number of concurrent threads
-#pacing="1s" # delay per iteration (Go duration format)
+duration="1m"
+threads=10  # number of concurrent threads
+pacing="1s" # delay per iteration (Go duration format)
 
 # Query template settings (required)
 # To parameterize values, use the built-in template functions (see documentation)
 [workflow.query_template]
-name="select all users"
-template="select * from users;"
+name="insert"
+template="""
+INSERT INTO tasks (title, description, priority)
+VALUES ({{ randStrRange 10 50 }}, {{ randStrRange 50 100 }}, {{ randIntRange 1 3 }});
+"""
 
 [output.report]
 to_file=true # save report in file with name loadhound_report_2006-01-02T15:04:05Z07:00.json

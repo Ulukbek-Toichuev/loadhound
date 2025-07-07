@@ -90,27 +90,27 @@ func TestClassifyQuery(t *testing.T) {
 		{
 			name:        "case: 'select' query",
 			query:       "select * from users;",
-			expectedMsg: QueryTypeRead.String(),
+			expectedMsg: TypeQuery,
 		},
 		{
 			name:        "case: 'CTE' query",
 			query:       "WITH temp AS (SELECT 1) SELECT * FROM temp;",
-			expectedMsg: QueryTypeRead.String(),
+			expectedMsg: TypeQuery,
 		},
 		{
 			name:        "case: 'insert' query",
 			query:       "insert into users(username) values('uluk');",
-			expectedMsg: QueryTypeExec.String(),
+			expectedMsg: TypeExec,
 		},
 		{
 			name:        "case: 'update' query",
 			query:       "update users set username = Uluk where user_id = 1;",
-			expectedMsg: QueryTypeExec.String(),
+			expectedMsg: TypeExec,
 		},
 		{
 			name:        "case: 'delete' query",
 			query:       "delete from users where user_id = 1;",
-			expectedMsg: QueryTypeExec.String(),
+			expectedMsg: TypeExec,
 		},
 	}
 
@@ -118,7 +118,7 @@ func TestClassifyQuery(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := IdentifyQuery(tc.query)
 			assert.Equal(t, tc.query, actual.RawSQL)
-			assert.Equal(t, tc.expectedMsg, actual.QueryType)
+			assert.Equal(t, tc.expectedMsg, actual.Type)
 		})
 	}
 }
