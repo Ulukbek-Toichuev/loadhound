@@ -12,135 +12,89 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influxdata/tdigest"
-	"go.uber.org/atomic"
+	"github.com/caio/go-tdigest/v4"
 )
 
 const (
-	defaultRespMin = math.MaxInt64
-	defaultRespMax = 0
+	defCompression float64 = 1000
+	defaultRespMin         = math.MaxInt64
+	defaultRespMax         = 0
 )
+
+// Local metric for per thread
+type LocalMetric struct {
+	td                *tdigest.TDigest // Using TDigest data structure for percentiles
+	start             time.Time        // Thread start time
+	rowsAffectedTotal int64            // Rows affected total count
+	iterationsTotal   int64            // Iterations total count
+	queriesTotal      int64            // Queries total count
+	errorsTotal       int64            // Errors total count
+	respTimeTotal     int64
+	respMax           time.Duration  // Max response time in current moment
+	respMin           time.Duration  // Min response time in current moment
+	respAvg           time.Duration  // Averarge response time in current monet
+	qps               float64        // Queries per second based on thread start time and current metric submited time
+	errMap            map[string]int // Map that contain error in string like key and his count like value int
+	rm                *sync.RWMutex
+}
+
+// Constructor
+func NewLocalMetric() (*LocalMetric, error) {
+	td, err := tdigest.New(tdigest.Compression(defCompression))
+	if err != nil {
+		return nil, err
+	}
+	return &LocalMetric{
+		td:      td,
+		start:   time.Now(),
+		respMin: defaultRespMin,
+		respMax: defaultRespMax,
+		errMap:  make(map[string]int),
+		rm:      &sync.RWMutex{},
+	}, nil
+}
+
+func (l *LocalMetric) SetStartTIme() {
+	l.start = time.Now()
+}
+
+func (l *LocalMetric) SetQueryMetric(q *QueryMetric) {
+	l.rm.RLock()
+	defer l.rm.RUnlock()
+
+	l.queriesTotal++
+	l.rowsAffectedTotal += q.RowsAffected
+
+	if q.ResponseTime < l.respMin {
+		l.respMin = q.ResponseTime
+	}
+
+	if q.ResponseTime > l.respMax {
+		l.respMax = q.ResponseTime
+	}
+
+	if q.Err != nil {
+		l.errMap[q.Err.Error()]++
+		l.errorsTotal++
+	}
+	l.respTimeTotal += int64(q.ResponseTime)
+
+	l.respAvg = time.Duration(l.respTimeTotal / l.queriesTotal)
+
+	testDuration := time.Since(l.start)
+	if testDuration > 0 {
+		l.qps = float64(l.queriesTotal) / testDuration.Seconds()
+	}
+	l.td.Add(float64(q.ResponseTime))
+}
 
 type QueryMetric struct {
 	Query        string
 	ResponseTime time.Duration
-	AffectedRows int64
+	RowsAffected int64
 	Err          error
-	ThreadID     int
+	ThreadId     int
 }
 
 type MetricEngine struct {
-	td                *TDigestWrapper
-	start             atomic.Time
-	curr              atomic.Time
-	qps               atomic.Float64
-	affectedRowsTotal atomic.Int64
-	queryTotal        atomic.Int64
-	iterTotal         atomic.Int64
-	threadsTotal      atomic.Int64
-	threadsFailed     atomic.Int64
-	errTotal          atomic.Int64
-	respMin           atomic.Duration
-	respMax           atomic.Duration
-	respTotal         atomic.Duration
-	errMap            sync.Map
-}
-
-func NewMetricEngine(compression float64) *MetricEngine {
-	var m MetricEngine
-	m.td = NewTDigestWrapper(compression)
-	m.respMin.Store(defaultRespMin)
-	m.respMax.Store(defaultRespMax)
-	return &m
-}
-
-func (m *MetricEngine) Activate() {
-	m.start.Store(time.Now())
-	m.curr.Store(time.Now())
-}
-
-func (m *MetricEngine) AddFailedThread() {
-	m.threadsFailed.Add(1)
-}
-
-func (m *MetricEngine) AddThread() {
-	m.threadsTotal.Add(1)
-}
-
-func (m *MetricEngine) AddQueryMetric(q *QueryMetric) {
-	m.iterTotal.Add(1)
-	m.queryTotal.Add(1)
-	if q.Err != nil {
-		m.errTotal.Add(1)
-	}
-	m.respTotal.Add(q.ResponseTime)
-	m.affectedRowsTotal.Add(q.AffectedRows)
-
-	for {
-		respMinOld := m.respMin.Load()
-		if q.ResponseTime >= respMinOld {
-			break
-		}
-		if m.respMin.CompareAndSwap(respMinOld, q.ResponseTime) {
-			break
-		}
-	}
-
-	for {
-		respMaxOld := m.respMax.Load()
-		if q.ResponseTime <= respMaxOld {
-			break
-		}
-		if m.respMax.CompareAndSwap(respMaxOld, q.ResponseTime) {
-			break
-		}
-	}
-
-	if q.Err != nil {
-		for {
-			actual, loaded := m.errMap.LoadOrStore(q.Err.Error(), 1)
-			if !loaded {
-				break
-			}
-			oldVal := actual.(int)
-			newVal := oldVal + 1
-			if m.errMap.CompareAndSwap(q.Err.Error(), oldVal, newVal) {
-				break
-			}
-		}
-	}
-
-	now := time.Now()
-	m.curr.Store(now)
-
-	// Calculate QPS = TotalQueries / TotalDuration
-	dur := now.Sub(m.start.Load())
-	if dur.Seconds() > 0 {
-		m.qps.Store(float64(m.queryTotal.Load()) / dur.Seconds())
-	} else {
-		m.qps.Store(0)
-	}
-
-	m.td.Add(float64(q.ResponseTime.Nanoseconds()))
-}
-
-type TDigestWrapper struct {
-	td *tdigest.TDigest
-	mu *sync.Mutex
-	w  float64
-}
-
-func NewTDigestWrapper(compression float64) *TDigestWrapper {
-	return &TDigestWrapper{
-		td: tdigest.NewWithCompression(compression),
-		mu: &sync.Mutex{},
-		w:  1,
-	}
-}
-
-func (tw *TDigestWrapper) Add(value float64) {
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
-
-	tw.td.Add(value, tw.w)
 }

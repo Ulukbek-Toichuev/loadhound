@@ -6,8 +6,8 @@ dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 # optional parameters; if omitted, driver defaults are used
 # use prepared statements (optional; defaults to false)
 [db.sql_config]
-max_open_connections=2
-max_idle_connections=2
+# max_open_connections=2
+# max_idle_connections=2
 # conn_max_idle_time="1m"
 # conn_max_lifetime="10m"
 use_prepared_statements=true
@@ -17,7 +17,6 @@ use_prepared_statements=true
 # iterations or duration must be set (mutually exclusive)
 # pacing between iterations (optional; default: 0 — next iteration starts immediately)
 [workflow]
-type="simple"
 # iterations=2
 duration="1m"
 threads=10  # number of concurrent threads

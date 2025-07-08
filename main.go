@@ -82,16 +82,13 @@ func Run(globalCtx context.Context) error {
 		return err
 	}
 
-	// Define workflow type and call appropriate handler
-	if runTestConfig.WorkflowConfig.Type == "simple" {
-		if err := simpleTestHandler(globalCtx, &runTestConfig, g); err != nil {
-			return err
-		}
+	if err := testHandler(globalCtx, &runTestConfig, g); err != nil {
+		return err
 	}
 	return nil
 }
 
-func simpleTestHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g *internal.GeneralEventController) error {
+func testHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g *internal.GeneralEventController) error {
 	defer g.Close()
 
 	var useStmt bool
@@ -103,13 +100,13 @@ func simpleTestHandler(globalCtx context.Context, cfg *internal.RunTestConfig, g
 		return err
 	}
 
-	executor, err := internal.NewSimpleExecutor(globalCtx, cfg, pQuery, g)
+	executor, err := internal.NewExecutor(globalCtx, cfg, pQuery, g)
 	if err != nil {
 		return err
 	}
 
-	// Call Start()
-	Start(globalCtx, executor, g, cfg)
+	// Call start()
+	start(globalCtx, executor, g, cfg)
 	return nil
 }
 
@@ -126,14 +123,14 @@ func prepareQuery(q *internal.QueryTemplateConfig, useStmt bool) (*internal.Prep
 	return pQuery, nil
 }
 
-func Start(globalCtx context.Context, exec internal.Executor, g *internal.GeneralEventController, cfg *internal.RunTestConfig) {
+func start(globalCtx context.Context, exec *internal.Executor, g *internal.GeneralEventController, cfg *internal.RunTestConfig) {
 	g.WriteWelcomeMsg(cfg.WorkflowConfig)
 
 	// Run test
-	m := exec.Run(globalCtx)
+	exec.Run(globalCtx)
 	g.WriteInfoMsgWithBar("end test")
 
-	if err := internal.GenerateReport(cfg, m); err != nil {
+	if err := internal.GenerateReport(cfg, nil); err != nil {
 		g.WriteErrMsgWithBar("failed to generate report", err)
 	}
 }

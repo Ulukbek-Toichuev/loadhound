@@ -37,7 +37,6 @@ type QueryTemplateConfig struct {
 }
 
 type WorkflowConfig struct {
-	Type                string               `toml:"type" json:"type"`
 	Iterations          int                  `toml:"iterations" json:"iterations"`
 	Duration            time.Duration        `toml:"duration" json:"duration,string"`
 	Threads             int                  `toml:"threads" json:"threads" validate:"required,min=1"`

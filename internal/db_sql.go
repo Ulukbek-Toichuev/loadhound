@@ -161,5 +161,5 @@ func countRows(rows *sql.Rows) (int64, error) {
 func measureLatency(query string, f func() (int64, error)) *QueryMetric {
 	start := time.Now()
 	count, err := f()
-	return &QueryMetric{Query: query, ResponseTime: time.Since(start), AffectedRows: count, Err: err}
+	return &QueryMetric{Query: query, ResponseTime: time.Since(start), RowsAffected: count, Err: err}
 }

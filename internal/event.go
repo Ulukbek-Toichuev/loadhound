@@ -60,9 +60,9 @@ func getLogFilename() string {
 
 func (g *GeneralEventController) WriteWelcomeMsg(cfg *WorkflowConfig) {
 	if cfg.Duration > 0 {
-		g.log.Info().Str("type", cfg.Type).Int("threads", cfg.Threads).Str("duration", cfg.Duration.String()).Str("pacing", cfg.Pacing.String()).Msg("start test with config")
+		g.log.Info().Int("threads", cfg.Threads).Str("duration", cfg.Duration.String()).Str("pacing", cfg.Pacing.String()).Msg("start test with config")
 	} else if cfg.Iterations > 0 {
-		g.log.Info().Str("type", cfg.Type).Int("threads", cfg.Threads).Int("iterations", cfg.Iterations).Str("pacing", cfg.Pacing.String()).Msg("start test with config")
+		g.log.Info().Int("threads", cfg.Threads).Int("iterations", cfg.Iterations).Str("pacing", cfg.Pacing.String()).Msg("start test with config")
 	}
 }
 
@@ -102,17 +102,17 @@ func (g *GeneralEventController) WriteQueryStat(q *QueryMetric) {
 	g.bar.Clear()
 	if q.Err != nil {
 		g.log.Err(q.Err).
-			Int("thread-id", q.ThreadID).
+			Int("thread-id", q.ThreadId).
 			Str("latency", q.ResponseTime.String()).
-			Int64("affected-rows", q.AffectedRows).
+			Int64("affected-rows", q.RowsAffected).
 			Str("query", q.Query).Msg("send query")
 		g.bar.RenderBlank()
 		return
 	}
 	g.log.Info().
-		Int("thread-id", q.ThreadID).
+		Int("thread-id", q.ThreadId).
 		Str("latency", q.ResponseTime.String()).
-		Int64("affected-rows", q.AffectedRows).
+		Int64("affected-rows", q.RowsAffected).
 		Str("query", q.Query).Msg("send query")
 	g.bar.RenderBlank()
 	g.bar.Add(1)
