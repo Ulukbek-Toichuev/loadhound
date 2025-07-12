@@ -418,6 +418,14 @@ func GetExecFunc(ctx context.Context, client *internal.SQLClient, stmtCfg *inter
 	return execFunc, nil
 }
 
+func getArgs(generators []internal.GeneratorFunc) []any {
+	args := make([]any, len(generators))
+	for idx, fn := range generators {
+		args[idx] = fn()
+	}
+	return args
+}
+
 func evaluatePacing(start time.Time, pacing time.Duration) {
 	if pacing == 0 {
 		return
