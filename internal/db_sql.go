@@ -10,66 +10,55 @@ package internal
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"text/template"
+	"errors"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 )
 
-type DriverType string
-
-const (
-	Postgres DriverType = "postgres"
-	Mysql    DriverType = "mysql"
-	Unknown  DriverType = "unknown"
-)
-
-type SQLWrapper struct {
-	db         *sql.DB
-	stmt       *sql.Stmt
-	DriverType DriverType
+type SQLClient struct {
+	DB   *sql.DB
+	Stmt *sql.Stmt
 }
 
-func NewSQLWrapper(globalCtx context.Context, dbCfg *DbConfig, tmpl *template.Template) (*SQLWrapper, error) {
-	// Get Database instance
+func NewSQLClient(ctx context.Context, dbCfg *DbConfig) (*SQLClient, error) {
 	db, err := sql.Open(dbCfg.Driver, dbCfg.Dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get db instance: %w", err)
+		return nil, err
 	}
-
-	// Set connection pool values
-	if dbCfg.SQLConfig != nil {
-		setConnPoolParams(dbCfg.SQLConfig, db)
+	setConnPoolParams(dbCfg.ConnPoolCfg, db)
+	if err := db.PingContext(ctx); err != nil {
+		return nil, err
 	}
-
-	// Check connection to the database using ping()
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed ping db: %w", err)
-	}
-
-	// If prepared statement is enable
-	// All queries or execs should be run using stmt instance
-	// Instead of directly using db
-	if dbCfg.SQLConfig != nil && dbCfg.SQLConfig.UseStmt {
-		queryWithBinder, err := BuildQueryWithBinds(tmpl, dbCfg.Driver)
-		if err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to get query with placeholders: %w", err)
-		}
-		stmt, err := db.PrepareContext(globalCtx, queryWithBinder)
-		if err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to get prepared statement: %w", err)
-		}
-		return &SQLWrapper{db: db, stmt: stmt, DriverType: GetDriverType(dbCfg.Driver)}, nil
-	}
-	return &SQLWrapper{db: db, DriverType: GetDriverType(dbCfg.Driver)}, nil
+	return &SQLClient{DB: db}, nil
 }
 
-func setConnPoolParams(cfg *SQLConfig, db *sql.DB) {
+func (sa *SQLClient) Close() error {
+	if sa.Stmt != nil {
+		if err := sa.Stmt.Close(); err != nil {
+			return err
+		}
+	}
+	return sa.DB.Close()
+}
+
+func (sa *SQLClient) Prepare(ctx context.Context, query string) (*SQLClient, error) {
+	stmt, err := sa.DB.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return &SQLClient{
+		DB:   sa.DB,
+		Stmt: stmt,
+	}, nil
+}
+
+func setConnPoolParams(cfg *ConnPoolCfg, db *sql.DB) {
+	if cfg == nil {
+		return
+	}
 	if cfg.MaxOpenConnections > 0 {
 		db.SetMaxOpenConns(cfg.MaxOpenConnections)
 	}
@@ -84,69 +73,90 @@ func setConnPoolParams(cfg *SQLConfig, db *sql.DB) {
 	}
 }
 
-func GetDriverType(driver string) DriverType {
-	switch driver {
-	case "postgres":
-		return Postgres
-	case "mysql":
-		return Mysql
-	default:
-		return Unknown
+type QueryResult struct {
+	Args         []any
+	Query        string
+	RowsAffected int64
+	ResponseTime time.Duration
+	Err          error
+}
+
+func (sa *SQLClient) ExecContext(ctx context.Context, query string) (*QueryResult, error) {
+	startTime := time.Now()
+	result, err := sa.DB.ExecContext(ctx, query)
+
+	queryResult := &QueryResult{Query: query, ResponseTime: time.Since(startTime)}
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
 	}
-}
-
-func (sw *SQLWrapper) IsStmt() bool {
-	return sw.stmt != nil
-}
-
-func (sw *SQLWrapper) Close() error {
-	if sw.stmt != nil {
-		sw.stmt.Close()
+	r, err := result.RowsAffected()
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
 	}
-	return sw.db.Close()
+	queryResult.RowsAffected = r
+	return queryResult, nil
 }
 
-func (sw *SQLWrapper) Exec(globalCtx context.Context, query string) *QueryMetric {
-	return measureLatency(query, func() (int64, error) {
-		result, err := sw.db.ExecContext(globalCtx, query)
-		if err != nil {
-			return 0, err
-		}
-		return result.RowsAffected()
-	})
+func (sa *SQLClient) QueryContext(ctx context.Context, query string) (*QueryResult, error) {
+	startTime := time.Now()
+	rows, err := sa.DB.QueryContext(ctx, query)
+
+	queryResult := &QueryResult{Query: query, ResponseTime: time.Since(startTime)}
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
+	}
+	r, err := countRows(rows)
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
+	}
+	queryResult.RowsAffected = r
+	return queryResult, nil
 }
 
-func (sw *SQLWrapper) Query(globalCtx context.Context, query string) *QueryMetric {
-	return measureLatency(query, func() (int64, error) {
-		rows, err := sw.db.QueryContext(globalCtx, query)
-		if err != nil {
-			return 0, err
-		}
-		return countRows(rows)
-	})
+func (sa *SQLClient) StmtExecContext(ctx context.Context, query string, args ...any) (*QueryResult, error) {
+	startTime := time.Now()
+	result, err := sa.Stmt.ExecContext(ctx, args...)
+
+	queryResult := &QueryResult{Query: query, Args: args, ResponseTime: time.Since(startTime)}
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
+	}
+	r, err := result.RowsAffected()
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
+	}
+	queryResult.RowsAffected = r
+	return queryResult, nil
 }
 
-func (sw *SQLWrapper) StmtExec(globalCtx context.Context, args ...any) *QueryMetric {
-	return measureLatency(fmt.Sprintf("%v", args), func() (int64, error) {
-		result, err := sw.stmt.ExecContext(globalCtx, args...)
-		if err != nil {
-			return 0, err
-		}
-		return result.RowsAffected()
-	})
-}
+func (sa *SQLClient) StmtQueryContext(ctx context.Context, query string, args ...any) (*QueryResult, error) {
+	startTime := time.Now()
+	rows, err := sa.Stmt.QueryContext(ctx, args...)
 
-func (sw *SQLWrapper) StmtQuery(globalCtx context.Context, args ...any) *QueryMetric {
-	return measureLatency(fmt.Sprintf("%v", args), func() (int64, error) {
-		rows, err := sw.stmt.QueryContext(globalCtx, args...)
-		if err != nil {
-			return 0, err
-		}
-		return countRows(rows)
-	})
+	queryResult := &QueryResult{Query: query, Args: args, ResponseTime: time.Since(startTime)}
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
+	}
+	r, err := countRows(rows)
+	if err != nil {
+		queryResult.Err = err
+		return queryResult, err
+	}
+	queryResult.RowsAffected = r
+	return queryResult, nil
 }
 
 func countRows(rows *sql.Rows) (int64, error) {
+	if rows == nil {
+		return 0, errors.New("rows is nil")
+	}
 	defer rows.Close()
 	var count int64
 	for rows.Next() {
@@ -158,8 +168,26 @@ func countRows(rows *sql.Rows) (int64, error) {
 	return count, nil
 }
 
-func measureLatency(query string, f func() (int64, error)) *QueryMetric {
-	start := time.Now()
-	count, err := f()
-	return &QueryMetric{Query: query, ResponseTime: time.Since(start), RowsAffected: count, Err: err}
+func DetectQueryType(query string) string {
+	trimmed := strings.TrimSpace(query)
+	lower := strings.ToLower(trimmed)
+	fields := strings.Fields(lower)
+
+	if len(fields) == 0 {
+		return "unknown"
+	}
+
+	switch fields[0] {
+	case "select":
+		return "query"
+	case "insert", "update", "delete":
+		return "exec"
+	case "with":
+		if strings.Contains(lower, "select") {
+			return "query"
+		}
+		return "exec"
+	default:
+		return "exec"
+	}
 }

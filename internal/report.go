@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/fatih/color"
@@ -28,15 +27,15 @@ type ReportData struct {
 }
 
 type QueryData struct {
-	TotalCount   int64  `json:"total"`
-	QPS          string `json:"qps"`
-	RespMin      string `json:"min"`
-	RespMax      string `json:"max"`
-	P50          string `json:"p50"`
-	P90          string `json:"p90"`
-	P95          string `json:"p95"`
-	AffectedRows int64  `json:"affected_rows"`
-	ErrCount     int64  `json:"err_total"`
+	TotalCount        int64  `json:"total"`
+	QPS               string `json:"qps"`
+	RespMin           string `json:"min"`
+	RespMax           string `json:"max"`
+	P50               string `json:"p50"`
+	P90               string `json:"p90"`
+	P95               string `json:"p95"`
+	RowsAffectedTotal int64  `json:"affected_rows"`
+	ErrCount          int64  `json:"err_total"`
 }
 
 type IterationData struct {
@@ -48,41 +47,41 @@ type ThreadData struct {
 	FailedCount int64 `json:"failed"`
 }
 
-func getReportData(cfg *RunTestConfig, metricEngine *MetricEngine) *ReportData {
-	totalQuery := metricEngine.queryTotal.Load()
-	qps := metricEngine.qps.Load()
-	respMin, respMax := metricEngine.respMin.Load(), metricEngine.respMax.Load()
+func getReportData(cfg *RunTestConfig, globalMetric *GlobalMetric) *ReportData {
+	totalQuery := globalMetric.QueriesTotal
+	qpsMax := globalMetric.Qps.Max
+	respMin, respMax := globalMetric.RespTime.Min, globalMetric.RespTime.Max
 
 	// Get percentiles
-	p50, p90, p95 := metricEngine.td.td.Quantile(0.50), metricEngine.td.td.Quantile(0.90), metricEngine.td.td.Quantile(0.95)
-	errTotal := metricEngine.errTotal.Load()
+	p50, p90, p95 := globalMetric.Td.Quantile(0.50), globalMetric.Td.Quantile(0.90), globalMetric.Td.Quantile(0.95)
+	errTotal := globalMetric.ErrorsTotal
 
 	return &ReportData{
 		RunTestConfig: cfg,
-		TestDuration:  time.Since(metricEngine.start.Load()).String(),
+		TestDuration:  time.Since(time.Now()).String(),
 		QueryData: &QueryData{
-			TotalCount:   totalQuery,
-			QPS:          fmt.Sprintf("%.2f", qps),
-			RespMin:      respMin.String(),
-			RespMax:      respMax.String(),
-			P50:          time.Duration(p50).String(),
-			P90:          time.Duration(p90).String(),
-			P95:          time.Duration(p95).String(),
-			AffectedRows: metricEngine.affectedRowsTotal.Load(),
-			ErrCount:     errTotal,
+			TotalCount:        totalQuery,
+			QPS:               fmt.Sprintf("%.2f", qpsMax),
+			RespMin:           respMin.String(),
+			RespMax:           respMax.String(),
+			P50:               time.Duration(p50).String(),
+			P90:               time.Duration(p90).String(),
+			P95:               time.Duration(p95).String(),
+			RowsAffectedTotal: globalMetric.RowsAffectedTotal,
+			ErrCount:          errTotal,
 		},
 		IterationData: &IterationData{
-			TotalCount: metricEngine.iterTotal.Load(),
+			TotalCount: globalMetric.IterationsTotal,
 		},
 		ThreadData: &ThreadData{
-			TotalCount:  metricEngine.threadsTotal.Load(),
-			FailedCount: metricEngine.threadsFailed.Load(),
+			TotalCount:  0,
+			FailedCount: 0,
 		},
-		TopErrors: getTopErrors(&metricEngine.errMap),
+		TopErrors: getTopErrors(globalMetric.ErrMap),
 	}
 }
 
-func GenerateReport(cfg *RunTestConfig, metricEngine *MetricEngine) error {
+func GenerateReport(cfg *RunTestConfig, globalMetric *GlobalMetric) error {
 	if cfg.OutputConfig == nil {
 		return nil
 	}
@@ -91,7 +90,7 @@ func GenerateReport(cfg *RunTestConfig, metricEngine *MetricEngine) error {
 		return nil
 	}
 
-	report := getReportData(cfg, metricEngine)
+	report := getReportData(cfg, globalMetric)
 	reportCfg := cfg.OutputConfig.ReportConfig
 	if reportCfg.ToConsole {
 		printColorReport(report)
@@ -126,11 +125,11 @@ func printColorReport(report *ReportData) {
 	cyan := color.New(color.FgCyan).SprintFunc()
 
 	fmt.Print(bold("\n========== LoadHound Report ==========\n"))
-	fmt.Printf("type: %s  duration: %s\n", cyan(report.RunTestConfig.WorkflowConfig.Type), cyan(report.TestDuration))
+	fmt.Printf("duration: %s\n", cyan(report.TestDuration))
 	fmt.Println()
 
 	fmt.Println(bold("Query"))
-	fmt.Printf("total: %s  failed: %s  qps: %s  affected rows: %s\n", cyan(report.QueryData.TotalCount), cyan(report.QueryData.ErrCount), cyan(report.QueryData.QPS), cyan(report.QueryData.AffectedRows))
+	fmt.Printf("total: %s  failed: %s  qps: %s  affected rows: %s\n", cyan(report.QueryData.TotalCount), cyan(report.QueryData.ErrCount), cyan(report.QueryData.QPS), cyan(report.QueryData.RowsAffectedTotal))
 	fmt.Printf("min: %s  max: %s\n", cyan(report.QueryData.RespMin), cyan(report.QueryData.RespMax))
 	fmt.Printf("p50: %s  p90: %s  p95: %s\n", cyan(report.QueryData.P50), cyan(report.QueryData.P90), cyan(report.QueryData.P95))
 	fmt.Println()
@@ -159,16 +158,8 @@ type errKV struct {
 }
 
 // Get top 5 errors by count
-func getTopErrors(errSyncMap *sync.Map) []string {
+func getTopErrors(errMap map[string]int) []string {
 	const maxErrLen = 5
-
-	errMap := make(map[string]int)
-
-	// Get data from sync.Map to errMap
-	errSyncMap.Range(func(key, value any) bool {
-		errMap[key.(string)] = value.(int)
-		return true
-	})
 
 	// Mapping to slice for sorting
 	errKVs := make([]errKV, 0, len(errMap))

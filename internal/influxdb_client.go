@@ -33,7 +33,7 @@ func NewInfluxDBClient(influxCfg *InfluxDBConfig) *InfluxDBClient {
 	}
 }
 
-func (ic *InfluxDBClient) Activate(globalCtx context.Context, wg *sync.WaitGroup, genEvent *GeneralEventController) {
+func (ic *InfluxDBClient) Activate(globalCtx context.Context, wg *sync.WaitGroup) {
 	ticker := time.NewTicker(ic.Period)
 	go func(wg *sync.WaitGroup, globalCtx context.Context) {
 		defer ic.Client.Close()
