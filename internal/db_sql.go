@@ -81,76 +81,76 @@ type QueryResult struct {
 	Err          error
 }
 
-func (sa *SQLClient) ExecContext(ctx context.Context, query string) (*QueryResult, error) {
+func (sa *SQLClient) ExecContext(ctx context.Context, query string) *QueryResult {
 	startTime := time.Now()
 	result, err := sa.DB.ExecContext(ctx, query)
 
 	queryResult := &QueryResult{Query: query, ResponseTime: time.Since(startTime)}
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	r, err := result.RowsAffected()
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	queryResult.RowsAffected = r
-	return queryResult, nil
+	return queryResult
 }
 
-func (sa *SQLClient) QueryContext(ctx context.Context, query string) (*QueryResult, error) {
+func (sa *SQLClient) QueryContext(ctx context.Context, query string) *QueryResult {
 	startTime := time.Now()
 	rows, err := sa.DB.QueryContext(ctx, query)
 
 	queryResult := &QueryResult{Query: query, ResponseTime: time.Since(startTime)}
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	r, err := countRows(rows)
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	queryResult.RowsAffected = r
-	return queryResult, nil
+	return queryResult
 }
 
-func (sa *SQLClient) StmtExecContext(ctx context.Context, query string, args ...any) (*QueryResult, error) {
+func (sa *SQLClient) StmtExecContext(ctx context.Context, query string, args ...any) *QueryResult {
 	startTime := time.Now()
 	result, err := sa.Stmt.ExecContext(ctx, args...)
 
 	queryResult := &QueryResult{Query: query, Args: args, ResponseTime: time.Since(startTime)}
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	r, err := result.RowsAffected()
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	queryResult.RowsAffected = r
-	return queryResult, nil
+	return queryResult
 }
 
-func (sa *SQLClient) StmtQueryContext(ctx context.Context, query string, args ...any) (*QueryResult, error) {
+func (sa *SQLClient) StmtQueryContext(ctx context.Context, query string, args ...any) *QueryResult {
 	startTime := time.Now()
 	rows, err := sa.Stmt.QueryContext(ctx, args...)
 
 	queryResult := &QueryResult{Query: query, Args: args, ResponseTime: time.Since(startTime)}
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	r, err := countRows(rows)
 	if err != nil {
 		queryResult.Err = err
-		return queryResult, err
+		return queryResult
 	}
 	queryResult.RowsAffected = r
-	return queryResult, nil
+	return queryResult
 }
 
 func countRows(rows *sql.Rows) (int64, error) {
