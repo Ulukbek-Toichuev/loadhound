@@ -20,6 +20,9 @@ import (
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal"
 	"github.com/Ulukbek-Toichuev/loadhound/pkg"
+
+	"github.com/rs/zerolog"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -35,6 +38,41 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func getLogFilename() string {
+	return fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
+}
+
+func GetLogger(cfg *internal.OutputConfig) (*zerolog.Logger, error) {
+	if cfg == nil || cfg.LogConfig == nil || !cfg.LogConfig.ToConsole && !cfg.LogConfig.ToFile {
+		discardLogger := zerolog.New(io.Discard)
+		return &discardLogger, nil
+	}
+
+	writers := make([]io.Writer, 0)
+	level, err := zerolog.ParseLevel(cfg.LogConfig.Level)
+	if err != nil {
+		return nil, err
+	}
+	zerolog.SetGlobalLevel(level)
+	if cfg.LogConfig.ToConsole {
+		writers = append(writers, &zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.TimeOnly})
+	}
+
+	var f *os.File
+	if cfg.LogConfig.ToFile {
+		var err error
+		f, err = os.OpenFile(getLogFilename(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, err
+		}
+		writers = append(writers, f)
+	}
+
+	multiWriter := zerolog.MultiLevelWriter(writers...)
+	logger := zerolog.New(multiWriter).With().Timestamp().Logger()
+	return &logger, nil
 }
 
 func Run(globalCtx context.Context) error {
@@ -59,18 +97,48 @@ func Run(globalCtx context.Context) error {
 		return err
 	}
 
-	// Validate config
-	if err := internal.ValidateConfig(runTestConfig); err != nil {
-		return err
+	logger, err := GetLogger(runTestConfig.OutputConfig)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
+
+	logger.Info().Msg("LoadHound started")
+	logger.Debug().
+		Str("config_file", *runTest).
+		Int("scenarios_count", len(runTestConfig.WorkflowConfig.Scenarios)).
+		Msg("Configuration loaded")
 
 	client, err := internal.NewSQLClient(globalCtx, runTestConfig.DbConfig)
 	if err != nil {
 		return err
 	}
 
+	logger.Info().
+		Str("database_type", runTestConfig.DbConfig.Driver).
+		Str("host", runTestConfig.DbConfig.Dsn).
+		Msg("Database connection established")
+
 	workflow := NewWorkflow(runTestConfig.WorkflowConfig.Scenarios)
-	return workflow.RunTest(globalCtx, client)
+
+	logger.Info().Msg("Starting load test execution")
+	startTime := time.Now()
+
+	err = workflow.RunTest(globalCtx, client, logger)
+
+	duration := time.Since(startTime)
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Str("total_duration", duration.String()).
+			Msg("Load test failed")
+		return err
+	}
+
+	logger.Info().
+		Str("total_duration", duration.String()).
+		Msg("Load test completed successfully")
+
+	return nil
 }
 
 type Id struct {
@@ -102,10 +170,13 @@ func (w *Workflow) RunTest(ctx context.Context, sqlClient *internal.SQLClient) e
 		return errors.New("scenarios cannot be nil")
 	}
 
-	var scenariosWG sync.WaitGroup
-	var globalId = Id{mu: &sync.Mutex{}}
-	for _, sc := range w.scenarios {
-		var threads = make([]*Thread, 0, sc.Threads)
+	logger.Info().
+		Int("scenarios_count", len(w.scenarios)).
+		Msg("Initializing scenarios")
+
+	globalId := Id{mu: &sync.Mutex{}}
+	g, ctx := errgroup.WithContext(ctx)
+	for i, sc := range w.scenarios {
 		sc := sc
 		scenariosWG.Add(1)
 		go func(ctx context.Context) {
