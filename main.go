@@ -262,6 +262,41 @@ func (w *Workflow) RunTest(ctx context.Context, sqlClient *internal.SQLClient) e
 	return nil
 }
 
+func calculateRampUpInterval(rampUp time.Duration, threads int) time.Duration {
+	if threads == 1 {
+		return rampUp
+	}
+
+	intervalNanos := int64(rampUp) / int64(threads-1)
+	interval := time.Duration(intervalNanos)
+
+	if interval < rampUpMin {
+		interval = rampUpMin
+	}
+
+	maxInterval := rampUp / time.Duration(threads)
+	if interval > maxInterval {
+		interval = maxInterval
+	}
+	return interval
+}
+
+func initThreads(threads int, globalId *Id, execFunc ExecFunc, pacing time.Duration, query string, logger *zerolog.Logger) ([]*Thread, error) {
+	var preparedThreads = make([]*Thread, 0, threads)
+	for i := 0; i < threads; i++ {
+		m, err := internal.NewLocalMetric()
+		if err != nil {
+			return nil, err
+		}
+		preparedThreads = append(preparedThreads, NewThread(globalId.GetId(), m, execFunc, pacing, query, logger))
+	}
+	logger.Debug().
+		Int("threads_initialized", threads).
+		Str("pacing", pacing.String()).
+		Msg("Threads initialized successfully")
+	return preparedThreads, nil
+}
+
 type Thread struct {
 	Id       int
 	Metric   *internal.LocalMetric
