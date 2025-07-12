@@ -40,3 +40,4 @@ to_console=true
 [output.log]
 to_file= true
 to_console=false
+level="trace"
