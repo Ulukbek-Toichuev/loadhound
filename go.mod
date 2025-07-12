@@ -7,6 +7,7 @@ require (
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/google/uuid v1.6.0
 	github.com/influxdata/influxdb-client-go/v2 v2.14.0
+	github.com/rs/zerolog v1.34.0
 )
 
 require (
@@ -25,5 +26,6 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/sync v0.16.0
+	golang.org/x/sys v0.34.0 // indirect
 )
