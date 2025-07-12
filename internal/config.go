@@ -66,8 +66,9 @@ type ReportConfig struct {
 }
 
 type LogConfig struct {
-	ToFile    bool `toml:"to_file" json:"to_file"`
-	ToConsole bool `toml:"to_console" json:"to_console"`
+	Level     string `toml:"level" json:"level"`
+	ToFile    bool   `toml:"to_file" json:"to_file"`
+	ToConsole bool   `toml:"to_console" json:"to_console"`
 }
 
 type InfluxDBConfig struct {
