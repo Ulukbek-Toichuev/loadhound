@@ -29,9 +29,13 @@ func GetGenerators(args string) ([]GeneratorFunc, error) {
 	}
 	argsSplit := strings.Split(args, ",")
 
-	generators := make([]GeneratorFunc, 0)
+	generators := make([]GeneratorFunc, 0, len(argsSplit))
 	for _, arg := range argsSplit {
 		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue // Skip empty arguments
+		}
+
 		funcSignature := strings.Fields(arg)
 		funcName := funcSignature[0]
 		if funcName == "" {
@@ -41,71 +45,84 @@ func GetGenerators(args string) ([]GeneratorFunc, error) {
 		switch funcName {
 		case "randBool":
 			if len(funcSignature) > 1 {
-				return nil, fmt.Errorf("invalid function signature, randBool() not support args: %v", funcSignature)
+				return nil, fmt.Errorf("invalid function signature, randBool() does not support args: %v", funcSignature)
 			}
 			generators = append(generators, func() any { return RandBool() })
+
 		case "randIntRange":
 			if len(funcSignature) != 3 {
-				return nil, fmt.Errorf("randIntRange() invalide signature: %v", funcSignature)
+				return nil, fmt.Errorf("randIntRange() requires exactly 2 arguments, got %d: %v", len(funcSignature)-1, funcSignature)
 			}
-			parsedArgs, err := parseInt(funcSignature[:1]...)
+			parsedArgs, err := parseInt(funcSignature[1:]...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("randIntRange() argument parsing error: %w", err)
 			}
 			arg1, arg2 := parsedArgs[0], parsedArgs[1]
 			if err := validateIntArgs(arg1, arg2); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("randIntRange() validation error: %w", err)
 			}
 			generators = append(generators, func() any { return RandIntRange(arg1, arg2) })
+
 		case "randFloat64InRange":
 			if len(funcSignature) != 3 {
-				return nil, fmt.Errorf("randIntRange invalide signature: %v", funcSignature)
+				return nil, fmt.Errorf("randFloat64InRange() requires exactly 2 arguments, got %d: %v", len(funcSignature)-1, funcSignature)
 			}
-			parsedArgs, err := parseFloat64(funcSignature[:1]...)
+			parsedArgs, err := parseFloat64(funcSignature[1:]...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("randFloat64InRange() argument parsing error: %w", err)
 			}
 			arg1, arg2 := parsedArgs[0], parsedArgs[1]
 			if err := validateFloat64Args(arg1, arg2); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("randFloat64InRange() validation error: %w", err)
 			}
 			generators = append(generators, func() any {
 				return RandFloat64InRange(arg1, arg2)
 			})
+
 		case "randUUID":
 			if len(funcSignature) > 1 {
-				return nil, fmt.Errorf("invalid function signature, randUUID() not support args: %v", funcSignature)
+				return nil, fmt.Errorf("invalid function signature, randUUID() does not support args: %v", funcSignature)
 			}
 			generators = append(generators, func() any { return RandUUID() })
-		case "randStringInRange":
+
+		case "randStringInRange", "randStrRange": // Support both variants
 			if len(funcSignature) != 3 {
-				return nil, fmt.Errorf("randStringInRange invalide signature: %v", funcSignature)
+				return nil, fmt.Errorf("randStringInRange() requires exactly 2 arguments, got %d: %v", len(funcSignature)-1, funcSignature)
 			}
-			parsedArgs, err := parseInt(funcSignature[:1]...)
+			parsedArgs, err := parseInt(funcSignature[1:]...)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("randStringInRange() argument parsing error: %w", err)
 			}
 			arg1, arg2 := parsedArgs[0], parsedArgs[1]
 			if err := validateIntArgs(arg1, arg2); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("randStringInRange() validation error: %w", err)
 			}
 			generators = append(generators, func() any { return RandStringInRange(arg1, arg2) })
+
 		case "getTimestampNow":
 			if len(funcSignature) > 1 {
-				return nil, fmt.Errorf("invalid function signature, getTimestampNow() not support args: %v", funcSignature)
+				return nil, fmt.Errorf("invalid function signature, getTimestampNow() does not support args: %v", funcSignature)
 			}
 			generators = append(generators, func() any { return GetTimestampNow() })
+
+		default:
+			return nil, fmt.Errorf("unknown function: %s", funcName)
 		}
 	}
+
+	if len(generators) == 0 {
+		return nil, errors.New("no valid generators found")
+	}
+
 	return generators, nil
 }
 
 func parseInt(args ...string) ([]int, error) {
-	result := make([]int, 0, len(args))
+	result := make([]int, len(args))
 	for idx, arg := range args {
 		p, err := strconv.Atoi(arg)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid integer argument '%s': %w", arg, err)
 		}
 		result[idx] = p
 	}
@@ -113,11 +130,11 @@ func parseInt(args ...string) ([]int, error) {
 }
 
 func parseFloat64(args ...string) ([]float64, error) {
-	result := make([]float64, 0, len(args))
+	result := make([]float64, len(args))
 	for idx, arg := range args {
 		p, err := strconv.ParseFloat(arg, 64)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid float64 argument '%s': %w", arg, err)
 		}
 		result[idx] = p
 	}
@@ -129,23 +146,41 @@ func RandBool() bool {
 }
 
 func RandIntRange(min, max int) int {
+	if min >= max {
+		return min // Fallback for invalid range
+	}
 	return rand.IntN(max-min) + min
 }
 
 func RandFloat64InRange(min, max float64) float64 {
+	if min >= max {
+		return min // Fallback for invalid range
+	}
 	return rand.Float64()*(max-min) + min
 }
 
 func RandUUID() string {
 	u, err := uuid.NewRandom()
 	if err != nil {
-		return ""
+		// Return a fallback UUID instead of empty string
+		return "00000000-0000-0000-0000-000000000000"
 	}
 	return u.String()
 }
 
 func RandStringInRange(min, max int) string {
+	if min >= max {
+		return "" // Fallback for invalid range
+	}
+	if min < 0 {
+		min = 0
+	}
+
 	n := rand.IntN(max-min+1) + min
+	if n == 0 {
+		return ""
+	}
+
 	b := make([]byte, n)
 	for i := 0; i < len(b); i++ {
 		b[i] = letters[rand.IntN(len(letters))]
@@ -155,30 +190,30 @@ func RandStringInRange(min, max int) string {
 
 func validateIntArgs(arg1, arg2 int) error {
 	if arg1 >= arg2 {
-		return fmt.Errorf("arg: %d must be less than arg: %d", arg1, arg2)
+		return fmt.Errorf("min value %d must be less than max value %d", arg1, arg2)
 	}
 	if arg1 < 0 {
-		return fmt.Errorf("arg %d cannot be less than 0", arg1)
+		return fmt.Errorf("min value %d cannot be negative", arg1)
 	}
 	if arg2 > math.MaxInt {
-		return fmt.Errorf("arg %d more than go max int", arg2)
+		return fmt.Errorf("max value %d exceeds maximum integer value", arg2)
 	}
 	return nil
 }
 
 func validateFloat64Args(arg1, arg2 float64) error {
 	if arg1 >= arg2 {
-		return fmt.Errorf("arg: %.2f must be less than arg: %.2f", arg1, arg2)
+		return fmt.Errorf("min value %.2f must be less than max value %.2f", arg1, arg2)
 	}
-	if arg1 < math.SmallestNonzeroFloat64 {
-		return fmt.Errorf("arg %.2f cannot be less than smallest positive, non-zero float64", arg1)
+	if math.IsInf(arg1, 0) || math.IsNaN(arg1) {
+		return fmt.Errorf("min value %.2f is not a valid number", arg1)
 	}
-	if arg2 > math.MaxFloat64 {
-		return fmt.Errorf("arg %.2f more than go max float64", arg2)
+	if math.IsInf(arg2, 0) || math.IsNaN(arg2) {
+		return fmt.Errorf("max value %.2f is not a valid number", arg2)
 	}
 	return nil
 }
 
 func GetTimestampNow() string {
-	return fmt.Sprintf("'%s'", time.Now().Format("2006-01-02 15:04:05.999999"))
+	return time.Now().Format("2006-01-02 15:04:05.999999")
 }
