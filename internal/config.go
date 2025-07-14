@@ -40,6 +40,7 @@ type WorkflowConfig struct {
 }
 
 type ScenarioConfig struct {
+	Name            string           `toml:"name" json:"name"`
 	Iterations      int              `toml:"iterations" json:"iterations"`
 	Duration        time.Duration    `toml:"duration" json:"duration"`
 	Threads         int              `toml:"threads" json:"threads" validate:"required,min=1"`
