@@ -52,6 +52,7 @@ func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *ze
 		threadsCount   int
 		globalMetricWg = &sync.WaitGroup{}
 		localMetricRec = make(chan *LocalMetric)
+		globalId       = NewId()
 	)
 
 	// Initializing scenarios in parallel
@@ -63,7 +64,7 @@ func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *ze
 		threadsCount += sc.Threads
 		g.Go(func() error {
 			scenarioLogger := logger.With().Str("scenario_name", sc.Name).Int("scenario_id", scenarioIdx).Logger()
-			return w.runScenario(ctx, sqlClient, sc, NewId(), &scenarioLogger, localMetricRec)
+			return w.runScenario(ctx, sqlClient, sc, globalId, &scenarioLogger, localMetricRec)
 		})
 	}
 

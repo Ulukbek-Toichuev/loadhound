@@ -8,6 +8,7 @@ Licensed under the MIT License.
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -89,10 +90,28 @@ func ValidateConfig(cfg *RunTestConfig) error {
 		return err
 	}
 
+	if cfg.WorkflowConfig.Scenarios == nil {
+		return errors.New("non scenarios set for test")
+	}
+
+	if len(cfg.WorkflowConfig.Scenarios) == 0 {
+		return errors.New("non scenarios set for test")
+	}
+
 	for _, sc := range cfg.WorkflowConfig.Scenarios {
 		dur := sc.Duration
 		iter := sc.Iterations
 		pacing := sc.Pacing
+		threads := sc.Threads
+		if sc.StatementConfig == nil {
+			return errors.New("statement cannot be nil")
+		}
+		if sc.StatementConfig.Query == "" {
+			return errors.New("query cannot be empty")
+		}
+		if threads < 1 {
+			return errors.New("threads count must be >= 1")
+		}
 		if dur == 0 && iter == 0 {
 			return fmt.Errorf("either duration: %v or iteration: %d must be set", dur, iter)
 		}

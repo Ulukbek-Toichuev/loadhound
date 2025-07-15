@@ -206,14 +206,14 @@ func validateIntArgs(arg1, arg2 int) error {
 }
 
 func validateFloat64Args(arg1, arg2 float64) error {
-	if arg1 >= arg2 {
-		return fmt.Errorf("min value %.2f must be less than max value %.2f", arg1, arg2)
-	}
 	if math.IsInf(arg1, 0) || math.IsNaN(arg1) {
 		return fmt.Errorf("min value %.2f is not a valid number", arg1)
 	}
 	if math.IsInf(arg2, 0) || math.IsNaN(arg2) {
 		return fmt.Errorf("max value %.2f is not a valid number", arg2)
+	}
+	if arg1 >= arg2 {
+		return fmt.Errorf("min value %.2f must be less than max value %.2f", arg1, arg2)
 	}
 	return nil
 }
