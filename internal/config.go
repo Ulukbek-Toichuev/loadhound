@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless SQL load testing tool.
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/go-playground/validator/v10"
 )
 
 type RunTestConfig struct {
@@ -56,9 +57,8 @@ type StatementConfig struct {
 }
 
 type OutputConfig struct {
-	ReportConfig   *ReportConfig   `toml:"report" json:"report"`
-	LogConfig      *LogConfig      `toml:"log" json:"log"`
-	InfluxDBConfig *InfluxDBConfig `toml:"influx_db" json:"influxdb"`
+	ReportConfig *ReportConfig `toml:"report" json:"report"`
+	LogConfig    *LogConfig    `toml:"log" json:"log"`
 }
 
 type ReportConfig struct {
@@ -72,15 +72,6 @@ type LogConfig struct {
 	ToConsole bool   `toml:"to_console" json:"to_console"`
 }
 
-type InfluxDBConfig struct {
-	Bucket  string        `toml:"bucket"`
-	Org     string        `toml:"org"`
-	Token   string        `toml:"token"`
-	Url     string        `toml:"url"`
-	Period  time.Duration `toml:"period" json:"period"`
-	TimeOut time.Duration `toml:"timeout" json:"timeout"`
-}
-
 func ReadConfigFile(path string, out *RunTestConfig) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -92,9 +83,13 @@ func ReadConfigFile(path string, out *RunTestConfig) error {
 	return nil
 }
 
-func ValidateConfig(cfg RunTestConfig) error {
-	scenarios := cfg.WorkflowConfig.Scenarios
-	for _, sc := range scenarios {
+func ValidateConfig(cfg *RunTestConfig) error {
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := validate.Struct(cfg); err != nil {
+		return err
+	}
+
+	for _, sc := range cfg.WorkflowConfig.Scenarios {
 		dur := sc.Duration
 		iter := sc.Iterations
 		pacing := sc.Pacing

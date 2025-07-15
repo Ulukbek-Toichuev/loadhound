@@ -1,3 +1,10 @@
+/*
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
+Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
+
+Licensed under the MIT License.
+*/
+
 package internal
 
 import (
@@ -9,12 +16,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func getLogFilename() string {
-	return fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
-}
-
 func GetLogger(cfg *OutputConfig) (*zerolog.Logger, error) {
-	if cfg == nil || cfg.LogConfig == nil || !cfg.LogConfig.ToConsole && !cfg.LogConfig.ToFile {
+	if cfg == nil || cfg.LogConfig == nil || (!cfg.LogConfig.ToConsole && !cfg.LogConfig.ToFile) {
 		discardLogger := zerolog.New(io.Discard)
 		return &discardLogger, nil
 	}
@@ -31,8 +34,11 @@ func GetLogger(cfg *OutputConfig) (*zerolog.Logger, error) {
 
 	var f *os.File
 	if cfg.LogConfig.ToFile {
-		var err error
-		f, err = os.OpenFile(getLogFilename(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		var (
+			err      error
+			filename string = fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
+		)
+		f, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return nil, err
 		}

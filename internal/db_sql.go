@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless SQL load testing tool.
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
@@ -19,8 +19,7 @@ import (
 )
 
 type SQLClient struct {
-	DB   *sql.DB
-	Stmt *sql.Stmt
+	DB *sql.DB
 }
 
 func NewSQLClient(ctx context.Context, dbCfg *DbConfig) (*SQLClient, error) {
@@ -36,23 +35,27 @@ func NewSQLClient(ctx context.Context, dbCfg *DbConfig) (*SQLClient, error) {
 }
 
 func (sa *SQLClient) Close() error {
-	if sa.Stmt != nil {
-		if err := sa.Stmt.Close(); err != nil {
-			return err
-		}
-	}
 	return sa.DB.Close()
 }
 
-func (sa *SQLClient) Prepare(ctx context.Context, query string) (*SQLClient, error) {
+type PreparedStatement struct {
+	stmt   *sql.Stmt
+	client *SQLClient
+}
+
+func (sa *SQLClient) Prepare(ctx context.Context, query string) (*PreparedStatement, error) {
 	stmt, err := sa.DB.PrepareContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	return &SQLClient{
-		DB:   sa.DB,
-		Stmt: stmt,
+	return &PreparedStatement{
+		stmt:   stmt,
+		client: sa,
 	}, nil
+}
+
+func (ps *PreparedStatement) Close() error {
+	return ps.stmt.Close()
 }
 
 func setConnPoolParams(cfg *ConnPoolCfg, db *sql.DB) {
@@ -117,9 +120,9 @@ func (sa *SQLClient) QueryContext(ctx context.Context, query string) *QueryResul
 	return queryResult
 }
 
-func (sa *SQLClient) StmtExecContext(ctx context.Context, query string, args ...any) *QueryResult {
+func (sa *PreparedStatement) StmtExecContext(ctx context.Context, query string, args ...any) *QueryResult {
 	startTime := time.Now()
-	result, err := sa.Stmt.ExecContext(ctx, args...)
+	result, err := sa.stmt.ExecContext(ctx, args...)
 
 	queryResult := &QueryResult{Query: query, Args: args, ResponseTime: time.Since(startTime)}
 	if err != nil {
@@ -135,9 +138,9 @@ func (sa *SQLClient) StmtExecContext(ctx context.Context, query string, args ...
 	return queryResult
 }
 
-func (sa *SQLClient) StmtQueryContext(ctx context.Context, query string, args ...any) *QueryResult {
+func (sa *PreparedStatement) StmtQueryContext(ctx context.Context, query string, args ...any) *QueryResult {
 	startTime := time.Now()
-	rows, err := sa.Stmt.QueryContext(ctx, args...)
+	rows, err := sa.stmt.QueryContext(ctx, args...)
 
 	queryResult := &QueryResult{Query: query, Args: args, ResponseTime: time.Since(startTime)}
 	if err != nil {
@@ -178,14 +181,16 @@ func DetectQueryType(query string) string {
 	}
 
 	switch fields[0] {
-	case "select":
+	case "select", "show", "describe", "explain":
 		return "query"
-	case "insert", "update", "delete":
+	case "insert", "update", "delete", "create", "drop", "alter", "truncate":
 		return "exec"
 	case "with":
 		if strings.Contains(lower, "select") {
 			return "query"
 		}
+		return "exec"
+	case "call", "do":
 		return "exec"
 	default:
 		return "exec"

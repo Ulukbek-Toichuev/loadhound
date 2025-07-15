@@ -1,8 +1,14 @@
+/*
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
+Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
+
+Licensed under the MIT License.
+*/
+
 package internal
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -11,6 +17,23 @@ import (
 )
 
 const rampUpMin time.Duration = 10 * time.Millisecond
+
+type Id struct {
+	idx int
+	mu  *sync.Mutex
+}
+
+func NewId() *Id {
+	return &Id{mu: &sync.Mutex{}}
+}
+
+func (i *Id) GetId() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	i.idx++
+	return i.idx
+}
 
 type Workflow struct {
 	scenarios []*ScenarioConfig
@@ -22,43 +45,78 @@ func NewWorkflow(scenarios []*ScenarioConfig) *Workflow {
 	}
 }
 
-func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *zerolog.Logger) error {
+func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *zerolog.Logger) (*GlobalMetric, error) {
 	defer sqlClient.Close()
-	if w.scenarios == nil {
-		return errors.New("scenarios cannot be nil")
-	}
-	logger.Info().Int("scenarios_count", len(w.scenarios)).Msg("Initializing scenarios")
 
-	globalId := NewId()
+	var (
+		threadsCount   int
+		globalMetricWg = &sync.WaitGroup{}
+		localMetricRec = make(chan *LocalMetric)
+	)
+
+	// Initializing scenarios in parallel
+	logger.Info().Int("scenarios_count", len(w.scenarios)).Msg("Initializing scenarios")
 	g, ctx := errgroup.WithContext(ctx)
 	for i, sc := range w.scenarios {
 		sc := sc
 		scenarioIdx := i
+		threadsCount += sc.Threads
 		g.Go(func() error {
 			scenarioLogger := logger.With().Str("scenario_name", sc.Name).Int("scenario_id", scenarioIdx).Logger()
-			return w.runScenario(ctx, sqlClient, sc, globalId, &scenarioLogger)
+			return w.runScenario(ctx, sqlClient, sc, NewId(), &scenarioLogger, localMetricRec)
 		})
 	}
+
+	globalMetric := NewGlobalMetric()
+	globalMetric.SetThreadCount(threadsCount)
+
+	globalMetricWg.Add(1)
+	metrics := make([]*LocalMetric, 0, threadsCount)
+	go func(ctx context.Context) {
+		defer globalMetricWg.Done()
+		for range threadsCount {
+			select {
+			case <-ctx.Done():
+				return
+			case metric := <-localMetricRec:
+				metrics = append(metrics, metric)
+			}
+		}
+	}(ctx)
+
 	if err := g.Wait(); err != nil {
 		logger.Error().Err(err).Msg("One or more scenarios failed")
-		return err
+		return nil, err
 	}
 	logger.Info().Msg("All scenarios completed successfully")
-	return nil
+	globalMetric.Collect(metrics)
+	return globalMetric, nil
 }
 
-func (w *Workflow) runScenario(ctx context.Context, sqlClient *SQLClient, sc *ScenarioConfig, globalId *Id, logger *zerolog.Logger) error {
+func (w *Workflow) runScenario(ctx context.Context, sqlClient *SQLClient, sc *ScenarioConfig, globalId *Id, logger *zerolog.Logger, localMetricRec chan *LocalMetric) error {
 	logger.Info().Int("threads", sc.Threads).Str("duration", sc.Duration.String()).Int("iterations", sc.Iterations).Str("ramp_up", sc.RampUp.String()).Str("pacing", sc.Pacing.String()).Msg("Starting scenario execution")
-	execFunc, err := GetExecFunc(ctx, sqlClient, sc.StatementConfig)
+
+	// Get query executor func that will be iteratively called
+	execFunc, stmtClient, err := getExecFunc(ctx, sqlClient, sc.StatementConfig)
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to create execution function")
 		return err
 	}
-	threads, err := InitThreads(sc.Threads, globalId, execFunc, sc.Pacing, sc.StatementConfig.Query, logger)
+	defer func() error {
+		if stmtClient != nil {
+			return stmtClient.Close()
+		}
+		return nil
+	}()
+
+	// Initializing threads
+	threads, err := InitThreads(sc.Threads, globalId, execFunc, sc.Pacing, sc.StatementConfig.Query, logger, localMetricRec)
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to initialize threads")
 		return err
 	}
+
+	// Run with ramp_up if that param is set
 	var threadWg = &sync.WaitGroup{}
 	if sc.RampUp > 0 {
 		logger.Info().Str("ramp_up_duration", sc.RampUp.String()).Msg("Starting scenario with ramp-up")
@@ -68,12 +126,15 @@ func (w *Workflow) runScenario(ctx context.Context, sqlClient *SQLClient, sc *Sc
 }
 
 func (w *Workflow) runWithRampUp(ctx context.Context, sc *ScenarioConfig, threads []*Thread, threadWg *sync.WaitGroup, logger *zerolog.Logger) error {
+	// Calculation ramp_up interval, min value is 10 millisecond
 	intervalDur := calculateRampUpInterval(sc.RampUp, sc.Threads)
+
+	// Get ticker with ramp_up interval
 	ticker := time.NewTicker(intervalDur)
 	defer ticker.Stop()
 
 	logger.Debug().Str("ramp_up_interval", intervalDur.String()).Int("total_threads", len(threads)).Msg("Ramp-up configuration calculated")
-	if sc.Duration > 0 {
+	if sc.Duration > 0 { // Run threads based on duration
 		timeOutCtx, cancel := context.WithTimeout(ctx, sc.Duration)
 		defer cancel()
 		for _, thread := range threads {
@@ -87,7 +148,7 @@ func (w *Workflow) runWithRampUp(ctx context.Context, sc *ScenarioConfig, thread
 				go thread.RunOnDur(timeOutCtx, threadWg, at)
 			}
 		}
-	} else if sc.Iterations > 0 {
+	} else if sc.Iterations > 0 { // Run threads based on iterations
 		for _, thread := range threads {
 			select {
 			case <-ctx.Done():
@@ -108,7 +169,7 @@ func (w *Workflow) runWithoutRampUp(ctx context.Context, sc *ScenarioConfig, thr
 	if sc.Duration > 0 {
 		timeOutCtx, cancel := context.WithTimeout(ctx, sc.Duration)
 		defer cancel()
-		for _, thread := range threads {
+		for _, thread := range threads { // Run threads based on iterations
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -118,7 +179,7 @@ func (w *Workflow) runWithoutRampUp(ctx context.Context, sc *ScenarioConfig, thr
 			}
 		}
 	} else if sc.Iterations > 0 {
-		for _, thread := range threads {
+		for _, thread := range threads { // Run threads based on iterations
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -149,4 +210,51 @@ func calculateRampUpInterval(rampUp time.Duration, threads int) time.Duration {
 		interval = maxInterval
 	}
 	return interval
+}
+
+type ExecFunc func(ctx context.Context, query string) *QueryResult
+
+func getExecFunc(ctx context.Context, client *SQLClient, stmtCfg *StatementConfig) (ExecFunc, *PreparedStatement, error) {
+	var execFunc ExecFunc
+	if stmtCfg.Args != "" {
+		s, err := client.Prepare(ctx, stmtCfg.Query)
+		if err != nil {
+			return nil, nil, err
+		}
+		generators, err := GetGenerators(stmtCfg.Args)
+		if err != nil {
+			return nil, nil, err
+		}
+		queryType := DetectQueryType(stmtCfg.Query)
+		if queryType == "exec" {
+			execFunc = func(ctx context.Context, query string) *QueryResult {
+				args := getArgs(generators)
+				return s.StmtExecContext(ctx, query, args...)
+			}
+		}
+		if queryType == "query" {
+			execFunc = func(ctx context.Context, query string) *QueryResult {
+				args := getArgs(generators)
+				return s.StmtQueryContext(ctx, query, args...)
+			}
+		}
+		return execFunc, s, nil
+	}
+
+	queryType := DetectQueryType(stmtCfg.Query)
+	if queryType == "exec" {
+		execFunc = client.ExecContext
+	}
+	if queryType == "query" {
+		execFunc = client.QueryContext
+	}
+	return execFunc, nil, nil
+}
+
+func getArgs(generators []GeneratorFunc) []any {
+	args := make([]any, len(generators))
+	for idx, fn := range generators {
+		args[idx] = fn()
+	}
+	return args
 }

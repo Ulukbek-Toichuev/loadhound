@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless SQL load testing tool.
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
@@ -188,6 +188,10 @@ func RandStringInRange(min, max int) string {
 	return string(b)
 }
 
+func GetTimestampNow() string {
+	return time.Now().Format("2006-01-02 15:04:05.999999")
+}
+
 func validateIntArgs(arg1, arg2 int) error {
 	if arg1 >= arg2 {
 		return fmt.Errorf("min value %d must be less than max value %d", arg1, arg2)
@@ -212,8 +216,4 @@ func validateFloat64Args(arg1, arg2 float64) error {
 		return fmt.Errorf("max value %.2f is not a valid number", arg2)
 	}
 	return nil
-}
-
-func GetTimestampNow() string {
-	return time.Now().Format("2006-01-02 15:04:05.999999")
 }

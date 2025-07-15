@@ -44,3 +44,5 @@ go.work.sum
 
 # .vscode directory
 .vscode
+
+docker-compose.yml

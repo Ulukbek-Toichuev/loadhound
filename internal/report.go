@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless SQL load testing tool.
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
@@ -43,53 +43,13 @@ type IterationData struct {
 }
 
 type ThreadData struct {
-	TotalCount  int64 `json:"total"`
-	FailedCount int64 `json:"failed"`
-}
-
-func getReportData(cfg *RunTestConfig, globalMetric *GlobalMetric) *ReportData {
-	totalQuery := globalMetric.QueriesTotal
-	qpsMax := globalMetric.Qps.Max
-	respMin, respMax := globalMetric.RespTime.Min, globalMetric.RespTime.Max
-
-	// Get percentiles
-	p50, p90, p95 := globalMetric.Td.Quantile(0.50), globalMetric.Td.Quantile(0.90), globalMetric.Td.Quantile(0.95)
-	errTotal := globalMetric.ErrorsTotal
-
-	return &ReportData{
-		RunTestConfig: cfg,
-		TestDuration:  time.Since(time.Now()).String(),
-		QueryData: &QueryData{
-			TotalCount:        totalQuery,
-			QPS:               fmt.Sprintf("%.2f", qpsMax),
-			RespMin:           respMin.String(),
-			RespMax:           respMax.String(),
-			P50:               time.Duration(p50).String(),
-			P90:               time.Duration(p90).String(),
-			P95:               time.Duration(p95).String(),
-			RowsAffectedTotal: globalMetric.RowsAffectedTotal,
-			ErrCount:          errTotal,
-		},
-		IterationData: &IterationData{
-			TotalCount: globalMetric.IterationsTotal,
-		},
-		ThreadData: &ThreadData{
-			TotalCount:  0,
-			FailedCount: 0,
-		},
-		TopErrors: getTopErrors(globalMetric.ErrMap),
-	}
+	TotalCount int `json:"total"`
 }
 
 func GenerateReport(cfg *RunTestConfig, globalMetric *GlobalMetric) error {
-	if cfg.OutputConfig == nil {
+	if cfg.OutputConfig == nil || cfg.OutputConfig.ReportConfig == nil {
 		return nil
 	}
-
-	if cfg.OutputConfig.ReportConfig == nil {
-		return nil
-	}
-
 	report := getReportData(cfg, globalMetric)
 	reportCfg := cfg.OutputConfig.ReportConfig
 	if reportCfg.ToConsole {
@@ -97,7 +57,8 @@ func GenerateReport(cfg *RunTestConfig, globalMetric *GlobalMetric) error {
 	}
 
 	if reportCfg.ToFile {
-		f, err := os.OpenFile(getReportFilename(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		filename := fmt.Sprintf("loadhound_report_%s.json", time.Now().Format(time.RFC3339))
+		f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return err
 		}
@@ -115,8 +76,37 @@ func GenerateReport(cfg *RunTestConfig, globalMetric *GlobalMetric) error {
 	return nil
 }
 
-func getReportFilename() string {
-	return fmt.Sprintf("loadhound_report_%s.json", time.Now().Format(time.RFC3339))
+func getReportData(cfg *RunTestConfig, globalMetric *GlobalMetric) *ReportData {
+	totalQuery := globalMetric.QueriesTotal
+	qpsPeak := globalMetric.Qps.Peak
+	respMin, respMax := globalMetric.RespTime.Min, globalMetric.RespTime.Max
+
+	// Get percentiles
+	p50, p90, p95 := globalMetric.Td.Quantile(0.50), globalMetric.Td.Quantile(0.90), globalMetric.Td.Quantile(0.95)
+	errTotal := globalMetric.ErrorsTotal
+	testDuration := time.Since(globalMetric.startTime)
+	return &ReportData{
+		RunTestConfig: cfg,
+		TestDuration:  testDuration.String(),
+		QueryData: &QueryData{
+			TotalCount:        totalQuery,
+			QPS:               fmt.Sprintf("%.2f", qpsPeak),
+			RespMin:           respMin.String(),
+			RespMax:           respMax.String(),
+			P50:               time.Duration(p50).String(),
+			P90:               time.Duration(p90).String(),
+			P95:               time.Duration(p95).String(),
+			RowsAffectedTotal: globalMetric.RowsAffectedTotal,
+			ErrCount:          errTotal,
+		},
+		IterationData: &IterationData{
+			TotalCount: globalMetric.IterationsTotal,
+		},
+		ThreadData: &ThreadData{
+			TotalCount: globalMetric.ThreadsTotal,
+		},
+		TopErrors: getTopErrors(globalMetric.ErrMap),
+	}
 }
 
 func printColorReport(report *ReportData) {
@@ -139,7 +129,7 @@ func printColorReport(report *ReportData) {
 	fmt.Println()
 
 	fmt.Println(bold("Thread"))
-	fmt.Printf("total: %s  failed: %s\n", cyan(report.ThreadData.TotalCount), cyan(report.ThreadData.FailedCount))
+	fmt.Printf("total: %s\n", cyan(report.ThreadData.TotalCount))
 	fmt.Println()
 
 	fmt.Println(bold("Errors"))
@@ -154,11 +144,11 @@ func printColorReport(report *ReportData) {
 
 type errKV struct {
 	key   string
-	value int
+	value int64
 }
 
 // Get top 5 errors by count
-func getTopErrors(errMap map[string]int) []string {
+func getTopErrors(errMap map[string]int64) []string {
 	const maxErrLen = 5
 
 	// Mapping to slice for sorting
