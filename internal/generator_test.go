@@ -1,3 +1,10 @@
+/*
+LoadHound — Simple load testing cli tool for SQL-oriented RDBMS.
+Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
+
+Licensed under the MIT License.
+*/
+
 package internal
 
 import (
