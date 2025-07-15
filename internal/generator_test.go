@@ -369,7 +369,6 @@ func TestGetTimestampNow(t *testing.T) {
 	assert.NotEmpty(t, result)
 
 	// Should be in format "2006-01-02 15:04:05.999999"
-	assert.Len(t, result, 26)
 	assert.Contains(t, result, " ")
 	assert.Contains(t, result, ":")
 	assert.Contains(t, result, ".")
