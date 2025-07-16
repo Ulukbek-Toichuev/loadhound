@@ -24,10 +24,9 @@ type RunTestConfig struct {
 }
 
 type DbConfig struct {
-	Driver       string        `toml:"driver" json:"driver" validate:"required"`
-	Dsn          string        `toml:"dsn" json:"dsn" validate:"required"`
-	QueryTimeout time.Duration `toml:"query_timeout" json:"query_timeout"`
-	ConnPoolCfg  *ConnPoolCfg  `toml:"conn_pool" json:"conn_pool"`
+	Driver      string       `toml:"driver" json:"driver" validate:"required"`
+	Dsn         string       `toml:"dsn" json:"dsn" validate:"required"`
+	ConnPoolCfg *ConnPoolCfg `toml:"conn_pool" json:"conn_pool"`
 }
 
 type ConnPoolCfg struct {

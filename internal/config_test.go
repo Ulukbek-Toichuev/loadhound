@@ -420,9 +420,8 @@ func TestValidateConfig_EdgeCases(t *testing.T) {
 	t.Run("config with optional fields", func(t *testing.T) {
 		config := &RunTestConfig{
 			DbConfig: &DbConfig{
-				Driver:       "postgres",
-				Dsn:          "user:pass@localhost/db",
-				QueryTimeout: 30 * time.Second,
+				Driver: "postgres",
+				Dsn:    "user:pass@localhost/db",
 				ConnPoolCfg: &ConnPoolCfg{
 					MaxOpenConnections: 10,
 					MaxIdleConnections: 5,

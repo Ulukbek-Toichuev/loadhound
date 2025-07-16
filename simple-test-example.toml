@@ -1,7 +1,6 @@
 [db]
 driver="postgres"
 dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
-query_timeout="1s"
 
 [db.conn_pool]
 max_open_connections=5
