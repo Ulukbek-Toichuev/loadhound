@@ -45,4 +45,6 @@ go.work.sum
 # .vscode directory
 .vscode
 
-docker-compose.yml
+*.yml
+# Added by goreleaser init:
+dist/
