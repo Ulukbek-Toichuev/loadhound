@@ -20,7 +20,7 @@ import (
 	"github.com/common-nighthawk/go-figure"
 )
 
-const version string = "v0.0.1"
+const version string = "v0.1.0-alpha.1"
 
 var (
 	runTestFlag = flag.String("run-test", "", "Path to *.toml file with test configuration")
@@ -111,5 +111,5 @@ func printBanner() {
 	myFigure := figure.NewColorFigure("LoadHound", "", "red", true)
 	myFigure.Print()
 
-	fmt.Printf("\nLoadHound — Simple load testing cli tool for SQL-oriented RDBMS.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com.\nVersion %s\n\n", version)
+	fmt.Printf("\nRelentless load testing tool for SQL-oriented RDBMS.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com.\n%s\n\n", version)
 }
