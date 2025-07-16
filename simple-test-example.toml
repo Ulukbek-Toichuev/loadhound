@@ -4,7 +4,7 @@ dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 query_timeout="1s"
 
 [db.conn_pool]
-max_open_connections=2
+max_open_connections=5
 max_idle_connections=2
 conn_max_idle_time="30s"
 conn_max_lifetime="1m"
@@ -12,26 +12,29 @@ conn_max_lifetime="1m"
 [workflow]
 # Scenario 1
 [[workflow.scenarios]]
-#iterations=100
+name="scenario_insert"
+duration="10m"
+threads=2
+pacing="500ms"
+ramp_up="1m"
+
+[workflow.scenarios.statement]
+name="insert_tasks"
+query="INSERT INTO tasks (title, description, priority) VALUES ($1, $2, $3);"
+args="randStrRange 10 20, randStrRange 50 100, randIntRange 1 2"
+
+# Scenario 2
+[[workflow.scenarios]]
+name="scenario_select"
 duration="10m"
 threads=10
 pacing="500ms"
 ramp_up="1m"
 
 [workflow.scenarios.statement]
-name="insert_tasks"
-query="INSERT INTO tasks (title, description, priority) VALUES (?, ?, ?);"
-args="randStrRange 10 20, randStrRange 50 100, randIntRange 1 2"
-
-# Scenario 2
-[[workflow.scenarios]]
-duration="10m"
-threads=10
-ramp_up="1m"
-
-[workflow.scenarios.statement]
 name="select_tasks"
-query="SELECT * FROM tasks;"
+query="SELECT * FROM tasks t WHERE t.priority = $1;"
+args="randIntRange 1 2"
 
 [output.report]
 to_file=true
