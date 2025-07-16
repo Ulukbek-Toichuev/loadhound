@@ -113,6 +113,91 @@ Function | Description | Return type
 
 - Report can be saved in .json file with name: `loadhound_2006-01-02T15:04:05Z07:00.json`
 - Report contains your .toml configuration and report
+
+- Report format in `stdout`:
+```
+========== LoadHound Report ==========
+duration: 5.230952s
+
+Query
+total: 100  failed: 0  qps: 19.12  affected rows: 11100
+min: 56.683917ms  max: 442.162417ms
+p50: 71.248791ms  p90: 125.995541ms  p95: 185.654099ms
+
+Iteration
+total: 100
+
+Thread
+total: 5
+
+Errors
+No errors recorded.
+```
+
+- Report format in `JSON`:
+```json
+{
+  "test_config": {
+    "db": {
+      "driver": "postgres",
+      "dsn": "postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable",
+      "conn_pool": {
+        "max_open_connections": 2,
+        "max_idle_connections": 2,
+        "conn_max_idle_time": 0,
+        "conn_max_life_time": 0
+      }
+    },
+    "workflow": {
+      "scenarios": [
+        {
+          "name": "select_scenario",
+          "iterations": 20,
+          "duration": 0,
+          "threads": 5,
+          "pacing": 250000000,
+          "ramp_up": 0,
+          "statement": {
+            "name": "select_users",
+            "query": "SELECT * FROM users;",
+            "args": ""
+          }
+        }
+      ]
+    },
+    "output": {
+      "report": {
+        "to_file": true,
+        "to_console": true
+      },
+      "log": {
+        "level": "trace",
+        "to_file": true,
+        "to_console": true
+      }
+    }
+  },
+  "test_duration": "5.230952s",
+  "query_data": {
+    "total": 100,
+    "qps": "19.12",
+    "min": "56.683917ms",
+    "max": "442.162417ms",
+    "p50": "71.248791ms",
+    "p90": "125.995541ms",
+    "p95": "185.654099ms",
+    "affected_rows": 11100,
+    "err_total": 0
+  },
+  "iteration_data": {
+    "total": 100
+  },
+  "thread_data": {
+    "total": 5
+  },
+  "top_errors": []
+}
+```
   
 ## Supported Databases
 
