@@ -8,7 +8,7 @@
 
 > A fast, lightweight CLI tool for load testing SQL-based databases with flexible configuration and built-in random data generators.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Download and install (replace with actual installation method)
@@ -42,7 +42,7 @@ loadhound --run-test my-test-scenario.toml
 - **Comprehensive Reporting**: Console and file output with detailed metrics
 - **Configurable Logging**: Multiple log levels with file and console output options
 
-## 📦 Installation
+## Installation
 
 ### Using Go Install
 
