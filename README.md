@@ -3,6 +3,20 @@
 ![Go Version](https://img.shields.io/badge/Go-1.21+-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
+![GitHub all releases](https://img.shields.io/github/downloads/Ulukbek-Toichuev/loadhound/total)
+![CI](https://github.com/Ulukbek-Toichuev/loadhound/actions/workflows/go.yml/badge.svg)
+
+> A fast, lightweight CLI tool for load testing SQL-based databases with flexible configuration and built-in random data generators.
+
+## 🚀 Quick Start
+
+```bash
+# Download and install (replace with actual installation method)
+go install github.com/Ulukbek-Toichuev/loadhound@latest
+
+# Run a load test
+loadhound --run-test my-test-scenario.toml
+```
 
 ## Table of Contents
 
@@ -16,23 +30,37 @@
 ## Description
 
 **LoadHound** is a fast, lightweight CLI tool for load testing SQL-based databases.
-Define flexible, repeatable test scenarios using a simple TOML configuration format — no bloated GUI, just pure load.
-
-Simple, flexible, and built for performance.
 
 ## Features
 
-- Easy-to-write test scenarios in **TOML**
-- Built-in **random data generators**
-- Support for:
-  - PostgreSQL
-  - MySQL
-- Flexible load configuration:
-  - `duration`, `iterations`, `threads`, `pacing`, `ramp_up`
-- Supports **prepared statements** and **parameterized queries**
-- Adjustable **connection pooling**
-- Output to console and/or file
-- Support log levels
+- **Easy Configuration**: Write test scenarios in human-readable TOML format
+- **Built-in Data Generators**: Generate realistic test data with built-in random functions
+- **Multi-Database Support**: PostgreSQL and MySQL support out of the box
+- **Flexible Load Patterns**: Configure duration, threads, pacing, and ramp-up strategies
+- **Prepared Statements**: Optimized performance with parameterized queries
+- **Connection Pooling**: Adjustable connection pool settings for optimal resource usage
+- **Comprehensive Reporting**: Console and file output with detailed metrics
+- **Configurable Logging**: Multiple log levels with file and console output options
+
+## 📦 Installation
+
+### Using Go Install
+
+```bash
+go install github.com/Ulukbek-Toichuev/loadhound@latest
+```
+
+### From Source
+
+```bash
+git clone https://github.com/Ulukbek-Toichuev/loadhound.git
+cd loadhound
+go build -o loadhound cmd/main.go
+```
+
+### Binary Releases
+
+Download pre-compiled binaries from the [releases page](https://github.com/Ulukbek-Toichuev/loadhound/releases).
 
 ## Example Scenario
 
@@ -42,46 +70,31 @@ driver="postgres"
 dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 
 [db.conn_pool]
-max_open_connections=5
+max_open_connections=2
 max_idle_connections=2
-conn_max_idle_time="30s"
+conn_max_idle_time="1m"
 conn_max_lifetime="1m"
 
 [workflow]
-# Scenario 1
 [[workflow.scenarios]]
-name="scenario_insert"
-duration="10m"
+name="select_scenario"
+duration="15s"
 threads=2
-pacing="500ms"
-ramp_up="1m"
+pacing="1s"
 
 [workflow.scenarios.statement]
-name="insert_tasks"
-query="INSERT INTO tasks (title, description, priority) VALUES ($1, $2, $3);"
-args="randStrRange 10 20, randStrRange 50 100, randIntRange 1 2"
-
-# Scenario 2
-[[workflow.scenarios]]
-name="scenario_select"
-duration="10m"
-threads=10
-pacing="500ms"
-ramp_up="1m"
-
-[workflow.scenarios.statement]
-name="select_tasks"
-query="SELECT * FROM tasks t WHERE t.priority = $1;"
-args="randIntRange 1 2"
+name="select"
+query="select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;"
+args="randBool, randIntRange 100 1000"
 
 [output.report]
 to_file=true
 to_console=true
 
 [output.log]
-to_file= true
-to_console=false
-level="trace"
+to_file= false
+to_console=true
+level="debug"
 ```
 
 ## Usage
@@ -146,23 +159,23 @@ No errors recorded.
       "conn_pool": {
         "max_open_connections": 2,
         "max_idle_connections": 2,
-        "conn_max_idle_time": 0,
-        "conn_max_life_time": 0
+        "conn_max_idle_time": "1m",
+        "conn_max_life_time": "1m"
       }
     },
     "workflow": {
       "scenarios": [
         {
+          "duration": "15s",
+          "pacing": "1s",
+          "ramp_up": "0s",
           "name": "select_scenario",
-          "iterations": 20,
-          "duration": 0,
-          "threads": 5,
-          "pacing": 250000000,
-          "ramp_up": 0,
+          "iterations": 0,
+          "threads": 2,
           "statement": {
-            "name": "select_users",
-            "query": "SELECT * FROM users;",
-            "args": ""
+            "name": "select",
+            "query": "select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;\n",
+            "args": "randBool, randIntRange 100 1000"
           }
         }
       ]
@@ -173,29 +186,29 @@ No errors recorded.
         "to_console": true
       },
       "log": {
-        "level": "trace",
-        "to_file": true,
+        "level": "debug",
+        "to_file": false,
         "to_console": true
       }
     }
   },
-  "test_duration": "5.230952s",
+  "test_duration": "15.148043708s",
   "query_data": {
-    "total": 100,
-    "qps": "19.12",
-    "min": "56.683917ms",
-    "max": "442.162417ms",
-    "p50": "71.248791ms",
-    "p90": "125.995541ms",
-    "p95": "185.654099ms",
-    "affected_rows": 11100,
+    "total": 30,
+    "qps": "2.00",
+    "min": "41.465625ms",
+    "max": "257.656041ms",
+    "p50": "46.757021ms",
+    "p90": "58.230266ms",
+    "p95": "63.17277ms",
+    "affected_rows": 69,
     "err_total": 0
   },
   "iteration_data": {
-    "total": 100
+    "total": 30
   },
   "thread_data": {
-    "total": 5
+    "total": 2
   },
   "top_errors": []
 }

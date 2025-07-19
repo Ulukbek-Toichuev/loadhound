@@ -3,43 +3,28 @@ driver="postgres"
 dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 
 [db.conn_pool]
-max_open_connections=5
+max_open_connections=2
 max_idle_connections=2
-conn_max_idle_time="30s"
+conn_max_idle_time="1m"
 conn_max_lifetime="1m"
 
 [workflow]
-# Scenario 1
 [[workflow.scenarios]]
-name="scenario_insert"
-duration="10m"
+name="select_scenario"
+duration="15s"
 threads=2
-pacing="500ms"
-ramp_up="1m"
+pacing="1s"
 
 [workflow.scenarios.statement]
-name="insert_tasks"
-query="INSERT INTO tasks (title, description, priority) VALUES ($1, $2, $3);"
-args="randStrRange 10 20, randStrRange 50 100, randIntRange 1 2"
-
-# Scenario 2
-[[workflow.scenarios]]
-name="scenario_select"
-duration="10m"
-threads=10
-pacing="500ms"
-ramp_up="1m"
-
-[workflow.scenarios.statement]
-name="select_tasks"
-query="SELECT * FROM tasks t WHERE t.priority = $1;"
-args="randIntRange 1 2"
+name="select"
+query="select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;"
+args="randBool, randIntRange 100 1000"
 
 [output.report]
 to_file=true
 to_console=true
 
 [output.log]
-to_file= true
-to_console=false
-level="trace"
+to_file= false
+to_console=true
+level="debug"
