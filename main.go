@@ -86,9 +86,8 @@ func run(globalCtx context.Context) error {
 	logger.Info().Msg("Starting load test execution")
 
 	// Run test
-	globalMetric, err := workflow.RunTest(globalCtx, client, logger)
-
-	if err != nil {
+	globalMetric := internal.NewGlobalMetric()
+	if err := workflow.RunTest(globalCtx, client, logger, globalMetric); err != nil {
 		logger.Error().Err(err).Str("total_duration", time.Since(globalMetric.GetStartTime()).String()).Msg("Load test failed")
 		return err
 	}
@@ -102,8 +101,7 @@ func usage() {
   -run-test string
       Path to your *.toml file for running test
   -version
-      Get LoadHound version
-`
+      Get LoadHound version`
 	fmt.Println(usage)
 }
 

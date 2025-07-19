@@ -48,3 +48,4 @@ go.work.sum
 *.yml
 # Added by goreleaser init:
 dist/
+loadhound
