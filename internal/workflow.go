@@ -45,7 +45,7 @@ func NewWorkflow(scenarios []*ScenarioConfig) *Workflow {
 	}
 }
 
-func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *zerolog.Logger) (*GlobalMetric, error) {
+func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *zerolog.Logger, globalMetric *GlobalMetric) error {
 	defer sqlClient.Close()
 
 	var (
@@ -68,9 +68,7 @@ func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *ze
 		})
 	}
 
-	globalMetric := NewGlobalMetric()
 	globalMetric.SetThreadCount(threadsCount)
-
 	globalMetricWg.Add(1)
 	metrics := make([]*LocalMetric, 0, threadsCount)
 	go func(ctx context.Context) {
@@ -87,11 +85,11 @@ func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *ze
 
 	if err := g.Wait(); err != nil {
 		logger.Error().Err(err).Msg("One or more scenarios failed")
-		return nil, err
+		return err
 	}
 	logger.Info().Msg("All scenarios completed successfully")
 	globalMetric.Collect(metrics)
-	return globalMetric, nil
+	return nil
 }
 
 func (w *Workflow) runScenario(ctx context.Context, sqlClient *SQLClient, sc *ScenarioConfig, globalId *Id, logger *zerolog.Logger, localMetricRec chan *LocalMetric) error {
