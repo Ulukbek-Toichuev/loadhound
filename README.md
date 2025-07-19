@@ -115,7 +115,8 @@ Function | Description | Return type
 - Report contains your .toml configuration and report
 
 - Report format in `stdout`:
-```
+
+```bash
 ========== LoadHound Report ==========
 duration: 5.230952s
 
@@ -135,6 +136,7 @@ No errors recorded.
 ```
 
 - Report format in `JSON`:
+
 ```json
 {
   "test_config": {
