@@ -8,6 +8,7 @@ Licensed under the MIT License.
 package internal
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -36,6 +37,19 @@ type ConnPoolCfg struct {
 	ConnMaxLifeTime    time.Duration `toml:"conn_max_life_time" json:"conn_max_life_time"`
 }
 
+func (cp *ConnPoolCfg) MarshalJSON() ([]byte, error) {
+	type AliasCP ConnPoolCfg
+	return json.Marshal(&struct {
+		ConnMaxIdleTime string `json:"conn_max_idle_time"`
+		ConnMaxLifeTime string `json:"conn_max_life_time"`
+		*AliasCP
+	}{
+		ConnMaxIdleTime: cp.ConnMaxIdleTime.String(),
+		ConnMaxLifeTime: cp.ConnMaxLifeTime.String(),
+		AliasCP:         (*AliasCP)(cp),
+	})
+}
+
 type WorkflowConfig struct {
 	Scenarios []*ScenarioConfig `toml:"scenarios" json:"scenarios" validate:"required"`
 }
@@ -48,6 +62,21 @@ type ScenarioConfig struct {
 	Pacing          time.Duration    `toml:"pacing" json:"pacing"`
 	RampUp          time.Duration    `toml:"ramp_up" json:"ramp_up"`
 	StatementConfig *StatementConfig `toml:"statement" json:"statement" validate:"required"`
+}
+
+func (sc *ScenarioConfig) MarshalJSON() ([]byte, error) {
+	type AliasSC ScenarioConfig
+	return json.Marshal(&struct {
+		Duration string `json:"duration"`
+		Pacing   string `json:"pacing"`
+		RampUp   string `json:"ramp_up"`
+		*AliasSC
+	}{
+		Duration: sc.Duration.String(),
+		Pacing:   sc.Pacing.String(),
+		RampUp:   sc.Pacing.String(),
+		AliasSC:  (*AliasSC)(sc),
+	})
 }
 
 type StatementConfig struct {
