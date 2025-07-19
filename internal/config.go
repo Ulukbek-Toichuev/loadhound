@@ -74,7 +74,7 @@ func (sc *ScenarioConfig) MarshalJSON() ([]byte, error) {
 	}{
 		Duration: sc.Duration.String(),
 		Pacing:   sc.Pacing.String(),
-		RampUp:   sc.Pacing.String(),
+		RampUp:   sc.RampUp.String(),
 		AliasSC:  (*AliasSC)(sc),
 	})
 }
