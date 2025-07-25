@@ -18,18 +18,22 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-type RunTestConfig struct {
+// RunConfig represents the top-level test configuration.
+// It combines database, workflow, and output settings.
+type RunConfig struct {
 	DbConfig       *DbConfig       `toml:"db" json:"db" validate:"required"`
 	WorkflowConfig *WorkflowConfig `toml:"workflow" json:"workflow" validate:"required"`
 	OutputConfig   *OutputConfig   `toml:"output" json:"output"`
 }
 
+// DbConfig defines settings required to connect to the database.
 type DbConfig struct {
-	Driver      string       `toml:"driver" json:"driver" validate:"required"`
-	Dsn         string       `toml:"dsn" json:"dsn" validate:"required"`
-	ConnPoolCfg *ConnPoolCfg `toml:"conn_pool" json:"conn_pool"`
+	Driver      string       `toml:"driver" json:"driver" validate:"required"` // e.g., "postgres"
+	Dsn         string       `toml:"dsn" json:"dsn" validate:"required"`       // connection string
+	ConnPoolCfg *ConnPoolCfg `toml:"conn_pool" json:"conn_pool"`               // optional connection pool settings
 }
 
+// ConnPoolCfg contains optional connection pool settings for database clients.
 type ConnPoolCfg struct {
 	MaxOpenConnections int           `toml:"max_open_connections" json:"max_open_connections"`
 	MaxIdleConnections int           `toml:"max_idle_connections" json:"max_idle_connections"`
@@ -50,18 +54,22 @@ func (cp *ConnPoolCfg) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// WorkflowConfig holds a list of scenario configurations.
+// Each scenario defines a unique load testing pattern.
 type WorkflowConfig struct {
 	Scenarios []*ScenarioConfig `toml:"scenarios" json:"scenarios" validate:"required"`
 }
 
+// ScenarioConfig defines one specific load testing scenario.
+// Either Duration or Iterations must be set (but not both).
 type ScenarioConfig struct {
-	Name            string           `toml:"name" json:"name"`
-	Iterations      int              `toml:"iterations" json:"iterations"`
-	Duration        time.Duration    `toml:"duration" json:"duration"`
-	Threads         int              `toml:"threads" json:"threads" validate:"required,min=1"`
-	Pacing          time.Duration    `toml:"pacing" json:"pacing"`
-	RampUp          time.Duration    `toml:"ramp_up" json:"ramp_up"`
-	StatementConfig *StatementConfig `toml:"statement" json:"statement" validate:"required"`
+	Name            string           `toml:"name" json:"name"`                                 // Scenario name
+	Iterations      int              `toml:"iterations" json:"iterations"`                     // Number of iterations per thread
+	Duration        time.Duration    `toml:"duration" json:"duration"`                         // Total duration of the scenario
+	Threads         int              `toml:"threads" json:"threads" validate:"required,min=1"` // Number of concurrent threads
+	Pacing          time.Duration    `toml:"pacing" json:"pacing"`                             // Delay between thread iterations
+	RampUp          time.Duration    `toml:"ramp_up" json:"ramp_up"`                           // Time to ramp from 0 to N threads
+	StatementConfig *StatementConfig `toml:"statement" json:"statement" validate:"required"`   // SQL statement to execute
 }
 
 func (sc *ScenarioConfig) MarshalJSON() ([]byte, error) {
@@ -79,26 +87,30 @@ func (sc *ScenarioConfig) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// StatementConfig holds the SQL query definition used by each scenario.
 type StatementConfig struct {
-	Name  string `toml:"name" json:"name"`
-	Query string `toml:"query" json:"query" validate:"required"`
-	Args  string `toml:"args" json:"args"`
+	Name  string `toml:"name" json:"name"`                       // Optional label
+	Query string `toml:"query" json:"query" validate:"required"` // SQL query text
+	Args  string `toml:"args" json:"args"`                       // Optional arguments for parameterized queries
 }
 
+// OutputConfig specifies how test results are reported and logged.
 type OutputConfig struct {
 	ReportConfig *ReportConfig `toml:"report" json:"report"`
 	LogConfig    *LogConfig    `toml:"log" json:"log"`
 }
 
+// ReportConfig defines whether the test report should be printed to console, written to file, or both.
 type ReportConfig struct {
 	ToFile    bool `toml:"to_file" json:"to_file"`
 	ToConsole bool `toml:"to_console" json:"to_console"`
 }
 
+// LogConfig defines logging behavior and destination.
 type LogConfig struct {
-	Level     string `toml:"level" json:"level"`
-	ToFile    bool   `toml:"to_file" json:"to_file"`
-	ToConsole bool   `toml:"to_console" json:"to_console"`
+	Level     string `toml:"level" json:"level"`           // "trace", "debug", "info", "error"....
+	ToFile    bool   `toml:"to_file" json:"to_file"`       // Write logs to file
+	ToConsole bool   `toml:"to_console" json:"to_console"` // Print logs to console
 }
 
 func GetConfig(path string) (*RunConfig, error) {
