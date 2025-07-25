@@ -153,26 +153,21 @@ func validateConfig(cfg *RunConfig) error {
 		dur := sc.Duration
 		iter := sc.Iterations
 		pacing := sc.Pacing
-		threads := sc.Threads
 		if sc.StatementConfig == nil {
 			return errors.New("statement cannot be nil")
 		}
 		if sc.StatementConfig.Query == "" {
 			return errors.New("query cannot be empty")
 		}
-		if threads < 1 {
-			return errors.New("threads count must be >= 1")
-		}
 		if dur == 0 && iter == 0 {
-			return fmt.Errorf("either duration: %v or iteration: %d must be set", dur, iter)
+			return fmt.Errorf("either duration: (%v) or iteration: (%d) must be set", dur, iter)
 		}
 		if dur > 0 && iter > 0 {
-			return fmt.Errorf("duration: %v and iteration: %d are mutual exclusion", dur, iter)
+			return fmt.Errorf("duration (%v) and iterations (%d) are mutually exclusive - specify only one", dur, iter)
 		}
 		if dur > 0 && pacing > dur {
-			return fmt.Errorf("pacing: %v cannot be more than test duration: %v", pacing, dur)
+			return fmt.Errorf("pacing: (%v) cannot be more than test duration: (%v)", pacing, dur)
 		}
 	}
-
 	return nil
 }
