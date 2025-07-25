@@ -101,7 +101,18 @@ type LogConfig struct {
 	ToConsole bool   `toml:"to_console" json:"to_console"`
 }
 
-func ReadConfigFile(path string, out *RunTestConfig) error {
+func GetConfig(path string) (*RunConfig, error) {
+	var cfg RunConfig
+	if err := readConfigFile(path, &cfg); err != nil {
+		return nil, err
+	}
+	if err := validateConfig(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func readConfigFile(path string, out *RunConfig) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -112,7 +123,7 @@ func ReadConfigFile(path string, out *RunTestConfig) error {
 	return nil
 }
 
-func ValidateConfig(cfg *RunTestConfig) error {
+func validateConfig(cfg *RunConfig) error {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(cfg); err != nil {
 		return err
