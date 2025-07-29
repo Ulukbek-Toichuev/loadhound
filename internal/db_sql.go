@@ -193,6 +193,6 @@ func DetectQueryType(query string) string {
 	case "call", "do":
 		return "exec"
 	default:
-		return "exec"
+		return "unknown"
 	}
 }
