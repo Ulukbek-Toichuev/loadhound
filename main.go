@@ -94,5 +94,5 @@ func printBanner() {
 	myFigure := figure.NewColorFigure("LoadHound", "", "red", true)
 	myFigure.Print()
 
-	fmt.Printf("\nRelentless load testing tool for SQL-oriented RDBMS.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com.\n%s\n\n", version)
+	fmt.Printf("\nRelentless load testing tool for SQL databases.\nCopyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com.\n%s\n\n", version)
 }

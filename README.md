@@ -7,7 +7,7 @@
 ![CI](https://github.com/Ulukbek-Toichuev/loadhound/actions/workflows/go.yml/badge.svg)
 ![Coverage](https://codecov.io/gh/Ulukbek-Toichuev/loadhound/branch/main/graph/badge.svg)
 
-> A fast, lightweight CLI tool for load testing SQL-based databases with flexible configuration and built-in random data generators.
+> A fast, lightweight CLI tool for load testing SQL databases with flexible configuration and built-in random data generators.
 
 ## Quick Start
 
@@ -70,17 +70,18 @@ Download pre-compiled binaries from the [releases page](https://github.com/Ulukb
 driver="postgres"
 dsn="postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable"
 
-[db.conn_pool]
-max_open_connections=2
-max_idle_connections=2
-conn_max_idle_time="1m"
-conn_max_lifetime="1m"
+# [db.conn_pool]
+# max_open_connections=2
+# max_idle_connections=2
+# conn_max_idle_time="1m"
+# conn_max_lifetime="1m"
 
 [workflow]
+
 [[workflow.scenarios]]
 name="select_scenario"
-duration="15s"
-threads=2
+duration="20s"
+threads=4
 pacing="1s"
 
 [workflow.scenarios.statement]
@@ -93,9 +94,9 @@ to_file=true
 to_console=true
 
 [output.log]
-to_file= false
+to_file= true
 to_console=true
-level="debug"
+level="info"
 ```
 
 ## Usage
@@ -104,7 +105,7 @@ level="debug"
 
 Flag | Description
 -----|------------
-`--run-test` | Path to your `.toml` scenario file
+`-run` | Path to your `.toml` scenario file
 `-version` | Print LoadHound version
 
 ### Built-in parameter functions
@@ -121,35 +122,57 @@ Function | Description | Return type
 ### Logs
 
 - Logs can be saved in file with name: `loadhound_2006-01-02T15:04:05Z07:00.log`
-- LoadHound supports global log levels:`panic fatal error warn info debug trace`
+- LoadHound supports global log levels: `panic fatal error warn info debug trace`
+- Logs format in `console`:
+
+```bash
+20:01:35 INF LoadHound started
+20:01:35 INF Database connection established driver=postgres dsn=postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable
+20:01:35 INF Initializing scenarios scenarios_count=1
+20:01:50 ERR Query execution failed error=EOF duration=221.831166ms query="select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;" scenario_id=0 scenario_name=select_scenario thread_id=1
+20:01:50 ERR Query execution failed error=EOF duration=224.628666ms query="select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;" scenario_id=0 scenario_name=select_scenario thread_id=4
+20:01:55 INF All scenarios completed successfully
+20:01:55 INF Test completed successfully total_duration=20.021146375s
+```
+
+- Logs format in `.log` file:
+
+```log
+{"level":"info","time":"2025-07-29T20:01:35+03:00","message":"LoadHound started"}
+{"level":"info","driver":"postgres","dsn":"postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable","time":"2025-07-29T20:01:35+03:00","message":"Database connection established"}
+{"level":"info","scenarios_count":1,"time":"2025-07-29T20:01:35+03:00","message":"Initializing scenarios"}
+{"level":"error","scenario_name":"select_scenario","scenario_id":0,"thread_id":1,"error":"EOF","duration":"221.831166ms","query":"select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;","time":"2025-07-29T20:01:50+03:00","message":"Query execution failed"}
+{"level":"error","scenario_name":"select_scenario","scenario_id":0,"thread_id":4,"error":"EOF","duration":"224.628666ms","query":"select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;","time":"2025-07-29T20:01:50+03:00","message":"Query execution failed"}
+{"level":"info","time":"2025-07-29T20:01:55+03:00","message":"All scenarios completed successfully"}
+{"level":"info","total_duration":"20.021146375s","time":"2025-07-29T20:01:55+03:00","message":"Test completed successfully"}
+```
 
 ### Report
 
 - Report can be saved in .json file with name: `loadhound_2006-01-02T15:04:05Z07:00.json`
 - Report contains your .toml configuration and report
-
-- Report format in `stdout`:
+- Report format in `console`:
 
 ```bash
 ========== LoadHound Report ==========
-duration: 5.230952s
+duration: 20.021146375s
 
 Query
-total: 100  failed: 0  qps: 19.12  affected rows: 11100
-min: 56.683917ms  max: 442.162417ms
-p50: 71.248791ms  p90: 125.995541ms  p95: 185.654099ms
-
-Iteration
-total: 100
+total: 80 success_rate: 97.50% failed_rate: 2.50%
+qps: 4.00 affected rows: 217
+response time - min: 58.64975ms  max: 411.507041ms
+response time - p50: 358.288667ms  p90: 391.202529ms  p95: 397.304208ms
 
 Thread
-total: 5
+thread count: 4
+iteration count: 80
 
 Errors
-No errors recorded.
+errors count: 2
+1. EOF
 ```
 
-- Report format in `JSON`:
+- Report format in `.json` file:
 
 ```json
 {
@@ -157,25 +180,20 @@ No errors recorded.
     "db": {
       "driver": "postgres",
       "dsn": "postgres://postgres:passwd@localhost:5432/loadhound_db?sslmode=disable",
-      "conn_pool": {
-        "max_open_connections": 2,
-        "max_idle_connections": 2,
-        "conn_max_idle_time": "1m",
-        "conn_max_life_time": "1m"
-      }
+      "conn_pool": null
     },
     "workflow": {
       "scenarios": [
         {
-          "duration": "15s",
+          "duration": "20s",
           "pacing": "1s",
           "ramp_up": "0s",
           "name": "select_scenario",
           "iterations": 0,
-          "threads": 2,
+          "threads": 4,
           "statement": {
             "name": "select",
-            "query": "select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;\n",
+            "query": "select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;",
             "args": "randBool, randIntRange 100 1000"
           }
         }
@@ -187,31 +205,33 @@ No errors recorded.
         "to_console": true
       },
       "log": {
-        "level": "debug",
-        "to_file": false,
+        "level": "info",
+        "to_file": true,
         "to_console": true
       }
     }
   },
-  "test_duration": "15.148043708s",
+  "test_duration": "20.021146375s",
   "query_data": {
-    "total": 30,
-    "qps": "2.00",
-    "min": "41.465625ms",
-    "max": "257.656041ms",
-    "p50": "46.757021ms",
-    "p90": "58.230266ms",
-    "p95": "63.17277ms",
-    "affected_rows": 69,
-    "err_total": 0
-  },
-  "iteration_data": {
-    "total": 30
+    "queries_total": 80,
+    "qps": "4.00",
+    "min_resp_time": "58.64975ms",
+    "max_resp_time": "411.507041ms",
+    "success_rate": "97.50%",
+    "failed_rate": "2.50%",
+    "p50_resp_time": "358.288667ms",
+    "p90_resp_time": "391.202529ms",
+    "p95_resp_time": "397.304208ms",
+    "affected_rows": 217,
+    "err_total": 2,
+    "top_errors": [
+      "EOF"
+    ]
   },
   "thread_data": {
-    "total": 2
-  },
-  "top_errors": []
+    "thread_count": 4,
+    "iteration_count": 80
+  }
 }
 ```
   
