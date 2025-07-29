@@ -1,0 +1,69 @@
+/*
+LoadHound — Relentless load testing tool for SQL databases.
+Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
+
+Licensed under the MIT License.
+*/
+
+package internal
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog"
+)
+
+type ScenarioDur struct {
+	logger  *zerolog.Logger
+	cfg     *ScenarioConfig
+	threads []*Thread
+}
+
+func NewScenarioDur(logger *zerolog.Logger, cfg *ScenarioConfig, threads []*Thread) *ScenarioDur {
+	return &ScenarioDur{
+		logger:  logger,
+		cfg:     cfg,
+		threads: threads,
+	}
+}
+
+func (sc *ScenarioDur) Run(ctx context.Context) error {
+	var wg sync.WaitGroup
+	timeOutCtx, cancel := context.WithTimeout(ctx, sc.cfg.Duration)
+	defer cancel()
+	if sc.cfg.RampUp > 0 {
+		// Calculation ramp_up interval, min value is 10 millisecond
+		intervalDur := calculateRampUpInterval(sc.cfg.RampUp, sc.cfg.Threads)
+
+		// Get ticker with ramp_up interval
+		ticker := time.NewTicker(intervalDur)
+		defer ticker.Stop()
+
+		sc.logger.Debug().Str("ramp_up_interval", intervalDur.String()).Int("total_threads", len(sc.threads)).Msg("Ramp-up configuration calculated")
+		for _, thread := range sc.threads {
+			select {
+			case <-ctx.Done():
+				sc.logger.Warn().Msg("Context cancelled during ramp-up")
+				return ctx.Err()
+			case <-ticker.C:
+				wg.Add(1)
+				go thread.RunOnDur(timeOutCtx, &wg)
+			}
+		}
+	} else {
+		for _, thread := range sc.threads {
+			select {
+			case <-ctx.Done():
+				sc.logger.Warn().Msg("Context cancelled during ramp-up")
+				return ctx.Err()
+			default:
+				wg.Add(1)
+				go thread.RunOnDur(timeOutCtx, &wg)
+			}
+		}
+	}
+	wg.Wait()
+	return nil
+}

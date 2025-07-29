@@ -41,22 +41,84 @@ type Workflow struct {
 
 func NewWorkflow(scenarios []*ScenarioConfig) *Workflow {
 	return &Workflow{
-		scenarios: scenarios,
+		cfg:    cfg,
+		logger: logger,
 	}
 }
 
-func (w *Workflow) RunTest(ctx context.Context, sqlClient *SQLClient, logger *zerolog.Logger, globalMetric *GlobalMetric) error {
-	defer sqlClient.Close()
+// Run all scenarios in parallel and collect their metrics
+func (w *Workflow) Run(ctx context.Context) error {
+	// Get SQL-client instance
+	client, err := w.getSQLClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
 
 	var (
-		threadsCount   int
-		globalMetricWg = &sync.WaitGroup{}
-		localMetricRec = make(chan *LocalMetric)
-		globalId       = NewId()
-	)
+		cfgs        = w.cfg.WorkflowConfig.Scenarios
+		scenarios   = make([]Scenario, 0)
+		threadStats = make([]*ThreadStat, 0)
+		sharedId    = NewSharedId()
 
-	// Initializing scenarios in parallel
-	logger.Info().Int("scenarios_count", len(w.scenarios)).Msg("Initializing scenarios")
+		threadCount int
+	)
+	w.logger.Info().Int("scenarios_count", len(cfgs)).Msg("Initializing scenarios")
+
+	for idx, cfg := range cfgs {
+		// Init new logger for scenario from base logger
+		scLogger := w.logger.With().Str("scenario_name", cfg.Name).Int("scenario_id", idx).Logger()
+
+		// Get ExecFunc
+		var execFunc ExecFunc
+		if len(cfg.StatementConfig.Args) != 0 {
+			generators, err := GetGenerators(cfg.StatementConfig.Args)
+			if err != nil {
+				return err
+			}
+			stmt, err := client.Prepare(ctx, cfg.StatementConfig.Query)
+			if err != nil {
+				return err
+			}
+			defer stmt.Close()
+			execFunc, err = getStmtFunc(stmt, cfg.StatementConfig.Query, generators)
+			if err != nil {
+				return err
+			}
+		} else {
+			execFunc, err = getExecFunc(client, cfg.StatementConfig.Query)
+			if err != nil {
+				return err
+			}
+		}
+		// Initialize threads for scenario
+		statementExecutor := NewStatementExecutor(execFunc, cfg.Pacing, cfg.StatementConfig)
+		pth, ths, err := InitThreads(cfg.Threads, sharedId, statementExecutor, &scLogger)
+		if err != nil {
+			return err
+		}
+		if pth == nil || threadStats == nil {
+			return errors.New("failed to init threads")
+		}
+
+		threadStats = append(threadStats, ths...)
+		threadCount += len(pth)
+		w.logger.Debug().Int("threads_initialized", len(pth)).Str("pacing", cfg.Pacing.String()).Msg("Threads initialized successfully")
+
+		// Create scenario
+		if cfg.Duration > 0 {
+			scenarios = append(scenarios, NewScenarioDur(&scLogger, cfg, pth))
+		}
+		if cfg.Iterations > 0 {
+			scenarios = append(scenarios, NewScenarioIter(&scLogger, cfg, pth))
+		}
+	}
+
+	// Init Global metrics collector
+	globalMetric := NewGlobalMetric(threadStats)
+	globalMetric.ThreadsTotal += threadCount
+
+	globalMetric.StartAt = time.Now()
 	g, ctx := errgroup.WithContext(ctx)
 	for i, sc := range w.scenarios {
 		sc := sc
