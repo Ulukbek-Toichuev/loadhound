@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless load testing tool for SQL-oriented RDBMS.
+LoadHound — Relentless load testing tool for SQL databases.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
