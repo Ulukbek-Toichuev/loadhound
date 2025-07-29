@@ -24,7 +24,7 @@ const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 type GeneratorFunc func() any
 
 func GetGenerators(args string) ([]GeneratorFunc, error) {
-	if len(args) == 0 {
+	if args == "" {
 		return nil, errors.New("args is empty")
 	}
 	argsSplit := strings.Split(args, ",")
