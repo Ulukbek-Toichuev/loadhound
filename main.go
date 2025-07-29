@@ -54,14 +54,10 @@ func run(globalCtx context.Context) error {
 
 	printBanner()
 
-	// Read configuration from file
-	var runTestConfig internal.RunTestConfig
-	if err := internal.ReadConfigFile(*runTestFlag, &runTestConfig); err != nil {
-		return err
-	}
-	// Validate configuration
-	if err := internal.ValidateConfig(&runTestConfig); err != nil {
-		return err
+	// Get configuration from file
+	cfg, err := internal.GetConfig(*runFlag)
+	if err != nil {
+		fatal(err)
 	}
 
 	// Get logger instance

@@ -136,9 +136,25 @@ func readConfigFile(path string, out *RunConfig) error {
 }
 
 func validateConfig(cfg *RunConfig) error {
-	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(cfg); err != nil {
-		return err
+	if cfg == nil {
+		return errors.New("configuration is nil")
+	}
+	// Validate database configuration
+	if cfg.DbConfig == nil {
+		return errors.New("database configuration is nil")
+	}
+	// Validate database driver type
+	if cfg.DbConfig.Driver == "" {
+		return errors.New("database driver is empty")
+	}
+	// Validate database destination
+	if cfg.DbConfig.Dsn == "" {
+		return errors.New("database destination (dsn) is empty")
+	}
+
+	// Validate workflow
+	if cfg.WorkflowConfig == nil {
+		return errors.New("workflow is nil")
 	}
 
 	if cfg.WorkflowConfig.Scenarios == nil {
