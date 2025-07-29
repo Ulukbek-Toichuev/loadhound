@@ -14,16 +14,17 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/Ulukbek-Toichuev/loadhound/internal"
+
 	"github.com/common-nighthawk/go-figure"
+	"github.com/rs/zerolog"
 )
 
-const version string = "v0.1.0-alpha.1"
+const version string = "v0.2.0"
 
 var (
-	runTestFlag = flag.String("run-test", "", "Path to *.toml file with test configuration")
+	runFlag     = flag.String("run", "", "Path to *.toml file with test configuration")
 	versionFlag = flag.Bool("version", false, "Get LoadHound current version")
 	signals     = []os.Signal{os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT}
 )
@@ -32,27 +33,18 @@ func main() {
 	globalCtx, globalStop := signal.NotifyContext(context.Background(), signals...)
 	defer globalStop()
 
-	if err := run(globalCtx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-func run(globalCtx context.Context) error {
 	flag.Usage = usage
 	flag.Parse()
 
 	if len(os.Args) == 1 {
 		flag.Usage()
-		return nil
+		return
 	}
 
 	if *versionFlag {
 		fmt.Printf("%s\n", version)
-		return nil
+		return
 	}
-
-	printBanner()
 
 	// Get configuration from file
 	cfg, err := internal.GetConfig(*runFlag)
@@ -61,44 +53,41 @@ func run(globalCtx context.Context) error {
 	}
 
 	// Get logger instance
-	logger, err := internal.GetLogger(runTestConfig.OutputConfig)
+	logger, err := internal.GetLogger(cfg.OutputConfig)
 	if err != nil {
-		return fmt.Errorf("failed to initialize logger: %w", err)
+		fatal(err)
 	}
 
-	logger.Info().Msg("LoadHound started")
-	logger.Debug().Str("config_file", *runTestFlag).Int("scenarios_count", len(runTestConfig.WorkflowConfig.Scenarios)).Msg("Configuration loaded")
-
-	// Get SQL-client instance
-	client, err := internal.NewSQLClient(globalCtx, runTestConfig.DbConfig)
-	if err != nil {
-		logger.Error().Err(err).Msg("Failed to create SQL client")
-		return err
-	}
-	logger.Info().Str("driver", runTestConfig.DbConfig.Driver).Str("dsn", runTestConfig.DbConfig.Dsn).Msg("Database connection established")
+	// Print welcome message
+	printWelcome(logger, len(cfg.WorkflowConfig.Scenarios))
 
 	// Get workflow instance
-	workflow := internal.NewWorkflow(runTestConfig.WorkflowConfig.Scenarios)
-	logger.Info().Msg("Starting load test execution")
+	workflow := internal.NewWorkflow(cfg, logger)
 
-	// Run test
-	globalMetric := internal.NewGlobalMetric()
-	if err := workflow.RunTest(globalCtx, client, logger, globalMetric); err != nil {
-		logger.Error().Err(err).Str("total_duration", time.Since(globalMetric.GetStartTime()).String()).Msg("Load test failed")
-		return err
+	// Run workflow
+	if err := workflow.Run(globalCtx); err != nil {
+		fatal(err)
 	}
-	logger.Info().Str("total_duration", time.Since(globalMetric.GetStartTime()).String()).Msg("Load test completed successfully")
-	internal.GenerateReport(&runTestConfig, globalMetric)
-	return nil
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
 }
 
 func usage() {
 	usage := `Usage of LoadHound:
-  -run-test string
+  -run
       Path to your *.toml file for running test
   -version
       Get LoadHound version`
 	fmt.Println(usage)
+}
+
+func printWelcome(logger *zerolog.Logger, sc int) {
+	printBanner()
+	logger.Info().Msg("LoadHound started")
+	logger.Debug().Str("config_file", *runFlag).Int("scenarios_count", sc).Msg("Configuration loaded")
 }
 
 func printBanner() {
