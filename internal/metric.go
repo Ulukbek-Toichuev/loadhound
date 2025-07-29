@@ -8,9 +8,7 @@ Licensed under the MIT License.
 package internal
 
 import (
-	"math"
-	"sync"
-	"sync/atomic"
+	"fmt"
 	"time"
 
 	"github.com/caio/go-tdigest/v4"
@@ -18,218 +16,143 @@ import (
 
 const (
 	tdigestCompression = 100.0
-	initialRespTimeMin = time.Duration(math.MaxInt64)
-	initialRespTimeMax = time.Duration(0)
 )
 
-// Local metric for per thread
-type LocalMetric struct {
-	// TDigest for percentile calculations
+type ThreadStat struct {
+	// TDigest for percentile calculations of response time
 	td *tdigest.TDigest
 
 	// Timing information
 	startTime time.Time
 	stopTime  time.Time
 
-	// Atomic counters for high-frequency operations
-	rowsAffected    int64 // atomic
-	iterationsTotal int64 // atomic
-	queriesTotal    int64 // atomic
-	errorsTotal     int64 // atomic
-	respTimeTotal   int64 // atomic (in nanoseconds)
+	iterationsTotal int64
 
-	// Response time tracking
-	currRespTime time.Duration
-	minRespTime  time.Duration
-	maxRespTime  time.Duration
+	// Query result
+	rowsAffected int64
+	queriesTotal int64
+	errorsTotal  int64
 
 	// Error tracking
 	errMap map[string]int64
 }
 
-// Constructor
-func NewLocalMetric() (*LocalMetric, error) {
+func NewThreadStat() (*ThreadStat, error) {
 	td, err := tdigest.New(tdigest.Compression(tdigestCompression))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create TDigest: %w", err)
 	}
-	return &LocalMetric{
-		td:          td,
-		errMap:      make(map[string]int64),
-		minRespTime: initialRespTimeMin,
-		maxRespTime: initialRespTimeMax,
+	return &ThreadStat{
+		td:     td,
+		errMap: make(map[string]int64),
 	}, nil
 }
 
-func (l *LocalMetric) StartAt(at time.Time) {
-	l.startTime = at
+func (t *ThreadStat) SetStartTime(at time.Time) {
+	t.startTime = at
 }
 
-func (l *LocalMetric) AddIters() {
-	l.iterationsTotal++
+func (t *ThreadStat) SetStopTime(at time.Time) {
+	if !t.startTime.IsZero() && at.Before(t.startTime) {
+		return
+	}
+	t.stopTime = at
 }
 
-func (l *LocalMetric) Submit(q *QueryResult) {
+func (t *ThreadStat) AddIter() {
+	t.iterationsTotal++
+}
+
+func (t *ThreadStat) SubmitQueryResult(q *QueryResult) {
 	if q == nil {
 		return
 	}
-
-	// Update atomic counters
-	atomic.AddInt64(&l.rowsAffected, q.RowsAffected)
-	atomic.AddInt64(&l.queriesTotal, 1)
-
-	// Handle errors
+	t.rowsAffected += q.RowsAffected
+	t.queriesTotal++
 	if q.Err != nil {
-		atomic.AddInt64(&l.errorsTotal, 1)
-		l.errMap[q.Err.Error()]++
-		return
+		t.errorsTotal++
+		t.errMap[q.Err.Error()]++
 	}
-
-	respTimeNs := int64(q.ResponseTime)
-	atomic.AddInt64(&l.respTimeTotal, respTimeNs)
-
-	l.currRespTime = q.ResponseTime
-	if q.ResponseTime < l.minRespTime {
-		l.minRespTime = q.ResponseTime
-	}
-	if q.ResponseTime > l.maxRespTime {
-		l.maxRespTime = q.ResponseTime
-	}
-	l.td.Add(float64(q.ResponseTime))
-}
-
-func (l *LocalMetric) Stop() {
-	l.stopTime = time.Now()
+	t.td.Add(float64(q.ResponseTime))
 }
 
 type GlobalMetric struct {
-	startTime         time.Time
-	mutex             *sync.RWMutex
+	StartAt           time.Time
+	EndAt             time.Time
 	Td                *tdigest.TDigest
 	RowsAffectedTotal int64
 	IterationsTotal   int64
 	QueriesTotal      int64
 	ErrorsTotal       int64
 	ErrMap            map[string]int64
-	RespTime          *ResponseTime
-	Qps               *QueryPerSecond
+	Qps               float64
 	ThreadsTotal      int
+	threadStats       []*ThreadStat
 }
 
-type ResponseTime struct {
-	Total int64
-	Min   time.Duration
-	Max   time.Duration
-	Avg   time.Duration
-}
-
-type QueryPerSecond struct {
-	Current float64
-	Peak    float64
-}
-
-func NewGlobalMetric() *GlobalMetric {
+func NewGlobalMetric(threadStats []*ThreadStat) *GlobalMetric {
 	td, err := tdigest.New(tdigest.Compression(tdigestCompression))
 	if err != nil {
 		return nil
 	}
 	return &GlobalMetric{
-		startTime: time.Now(),
-		Td:        td,
-		mutex:     &sync.RWMutex{},
-		RespTime: &ResponseTime{
-			Min: initialRespTimeMin,
-			Max: initialRespTimeMax,
-		},
-		Qps:    &QueryPerSecond{},
-		ErrMap: make(map[string]int64),
+		Td:          td,
+		ErrMap:      make(map[string]int64),
+		threadStats: threadStats,
 	}
 }
 
-func (gm *GlobalMetric) SetThreadCount(t int) {
-	gm.ThreadsTotal += t
-}
-
-func (gm *GlobalMetric) GetStartTime() time.Time {
-	return gm.startTime
-}
-
-func (gm *GlobalMetric) Collect(threadMetrics []*LocalMetric) {
-	if threadMetrics == nil {
+func (gm *GlobalMetric) Collect() {
+	if gm.threadStats == nil {
 		return
 	}
-
-	// Reset aggregated values
-	gm.RowsAffectedTotal = 0
-	gm.IterationsTotal = 0
-	gm.QueriesTotal = 0
-	gm.ErrorsTotal = 0
-	gm.RespTime.Total = 0
-	gm.RespTime.Min = initialRespTimeMin
-	gm.RespTime.Max = initialRespTimeMax
-	gm.ErrMap = make(map[string]int64)
-
-	// Create a new TDigest for fresh calculation
-	td, err := tdigest.New(tdigest.Compression(tdigestCompression))
-	if err != nil {
-		return
-	}
-	gm.Td = td
-
-	// Find earliest start time and latest stop time
-	var earliestStart, latestStop time.Time
-	for i, tm := range threadMetrics {
-		if tm == nil {
-			continue
-		}
-
-		if i == 0 || tm.startTime.Before(earliestStart) {
-			earliestStart = tm.startTime
-		}
-		if tm.stopTime.After(latestStop) {
-			latestStop = tm.stopTime
-		}
-	}
-
-	// Aggregate all metrics
-	for _, tm := range threadMetrics {
-		if tm == nil {
+	// Aggregate all metrics using snapshots for thread safety
+	for _, threadStat := range gm.threadStats {
+		if threadStat == nil {
 			continue
 		}
 
 		// Merge TDigest
-		gm.Td.Merge(tm.td)
+		gm.Td.Merge(threadStat.td)
 
 		// Aggregate counters
-		gm.RowsAffectedTotal += tm.rowsAffected
-		gm.IterationsTotal += tm.iterationsTotal
-		gm.QueriesTotal += tm.queriesTotal
-		gm.ErrorsTotal += tm.errorsTotal
-		gm.RespTime.Total += tm.respTimeTotal
+		gm.RowsAffectedTotal += threadStat.rowsAffected
+		gm.IterationsTotal += threadStat.iterationsTotal
+		gm.QueriesTotal += threadStat.queriesTotal
+		gm.ErrorsTotal += threadStat.errorsTotal
 
 		// Aggregate error map
-		for k, v := range tm.errMap {
+		for k, v := range threadStat.errMap {
 			gm.ErrMap[k] += v
 		}
-
-		// Update min/max response times
-		if tm.minRespTime < gm.RespTime.Min {
-			gm.RespTime.Min = tm.minRespTime
-		}
-		if tm.maxRespTime > gm.RespTime.Max {
-			gm.RespTime.Max = tm.maxRespTime
-		}
 	}
 
-	// Calculate average response time
-	if gm.QueriesTotal > 0 {
-		gm.RespTime.Avg = time.Duration(gm.RespTime.Total / gm.QueriesTotal)
+	// Calculate queries per second
+	totalDuration := gm.EndAt.Sub(gm.StartAt)
+	if totalDuration > 0 && gm.QueriesTotal > 0 {
+		gm.Qps = float64(gm.QueriesTotal) / totalDuration.Seconds()
 	}
+}
 
-	// Calculate QPS based on total test duration
-	testDuration := latestStop.Sub(earliestStart)
-	if testDuration > 0 && gm.QueriesTotal > 0 {
-		gm.Qps.Current = float64(gm.QueriesTotal) / testDuration.Seconds()
-		gm.Qps.Peak = gm.Qps.Current // For final report, current and peak are the same
+func (gm *GlobalMetric) GetQPS() float64 {
+	totalDuration := gm.EndAt.Sub(gm.StartAt).Seconds()
+	if totalDuration <= 0 {
+		return 0
 	}
+	return float64(gm.QueriesTotal) / totalDuration
+}
+
+func (gm *GlobalMetric) GetSuccessRate() float64 {
+	if gm.QueriesTotal == 0 {
+		return 0
+	}
+	successQueries := gm.QueriesTotal - gm.ErrorsTotal
+	return (float64(successQueries) / float64(gm.QueriesTotal)) * 100
+}
+
+func (gm *GlobalMetric) GetFailedRate() float64 {
+	if gm.QueriesTotal == 0 {
+		return 0
+	}
+	return (float64(gm.ErrorsTotal) / float64(gm.QueriesTotal)) * 100
 }
