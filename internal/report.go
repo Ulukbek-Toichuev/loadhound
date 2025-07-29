@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless load testing tool for SQL-oriented RDBMS.
+LoadHound — Relentless load testing tool for SQL databases.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
@@ -18,35 +18,33 @@ import (
 )
 
 type ReportData struct {
-	RunTestConfig *RunTestConfig `json:"test_config"`
-	TestDuration  string         `json:"test_duration"`
-	QueryData     *QueryData     `json:"query_data"`
-	IterationData *IterationData `json:"iteration_data"`
-	ThreadData    *ThreadData    `json:"thread_data"`
-	TopErrors     []string       `json:"top_errors"`
+	RunConfig    RunConfig  `json:"test_config"`
+	TestDuration string     `json:"test_duration"`
+	QueryData    QueryData  `json:"query_data"`
+	ThreadData   ThreadData `json:"thread_data"`
 }
 
 type QueryData struct {
-	TotalCount        int64  `json:"total"`
-	QPS               string `json:"qps"`
-	RespMin           string `json:"min"`
-	RespMax           string `json:"max"`
-	P50               string `json:"p50"`
-	P90               string `json:"p90"`
-	P95               string `json:"p95"`
-	RowsAffectedTotal int64  `json:"affected_rows"`
-	ErrCount          int64  `json:"err_total"`
-}
-
-type IterationData struct {
-	TotalCount int64 `json:"total"`
+	TotalCount        int64    `json:"queries_total"`
+	QPS               string   `json:"qps"`
+	RespMin           string   `json:"min_resp_time"`
+	RespMax           string   `json:"max_resp_time"`
+	SuccessRate       string   `json:"success_rate"`
+	FailedRate        string   `json:"failed_rate"`
+	P50               string   `json:"p50_resp_time"`
+	P90               string   `json:"p90_resp_time"`
+	P95               string   `json:"p95_resp_time"`
+	RowsAffectedTotal int64    `json:"affected_rows"`
+	ErrCount          int64    `json:"err_total"`
+	TopErrors         []string `json:"top_errors"`
 }
 
 type ThreadData struct {
-	TotalCount int `json:"total"`
+	ThreadCount    int   `json:"thread_count"`
+	IterationCount int64 `json:"iteration_count"`
 }
 
-func GenerateReport(cfg *RunTestConfig, globalMetric *GlobalMetric) error {
+func GenerateReport(cfg *RunConfig, globalMetric *GlobalMetric) error {
 	if cfg.OutputConfig == nil || cfg.OutputConfig.ReportConfig == nil {
 		return nil
 	}
@@ -76,36 +74,36 @@ func GenerateReport(cfg *RunTestConfig, globalMetric *GlobalMetric) error {
 	return nil
 }
 
-func getReportData(cfg *RunTestConfig, globalMetric *GlobalMetric) *ReportData {
-	totalQuery := globalMetric.QueriesTotal
-	qpsPeak := globalMetric.Qps.Peak
-	respMin, respMax := globalMetric.RespTime.Min, globalMetric.RespTime.Max
-
+func getReportData(cfg *RunConfig, globalMetric *GlobalMetric) *ReportData {
 	// Get percentiles
+	respMin, respMax := globalMetric.Td.Quantile(0.00), globalMetric.Td.Quantile(1)
 	p50, p90, p95 := globalMetric.Td.Quantile(0.50), globalMetric.Td.Quantile(0.90), globalMetric.Td.Quantile(0.95)
-	errTotal := globalMetric.ErrorsTotal
-	testDuration := time.Since(globalMetric.startTime)
+
+	// Get test duration
+	startAt := globalMetric.StartAt
+	endAt := globalMetric.EndAt
+	testDur := endAt.Sub(startAt)
 	return &ReportData{
-		RunTestConfig: cfg,
-		TestDuration:  testDuration.String(),
-		QueryData: &QueryData{
-			TotalCount:        totalQuery,
-			QPS:               fmt.Sprintf("%.2f", qpsPeak),
-			RespMin:           respMin.String(),
-			RespMax:           respMax.String(),
+		RunConfig:    *cfg,
+		TestDuration: testDur.String(),
+		QueryData: QueryData{
+			TotalCount:        globalMetric.QueriesTotal,
+			QPS:               fmt.Sprintf("%.2f", globalMetric.GetQPS()),
+			RespMin:           time.Duration(respMin).String(),
+			RespMax:           time.Duration(respMax).String(),
+			SuccessRate:       fmt.Sprintf("%.2f%%", globalMetric.GetSuccessRate()),
+			FailedRate:        fmt.Sprintf("%.2f%%", globalMetric.GetFailedRate()),
 			P50:               time.Duration(p50).String(),
 			P90:               time.Duration(p90).String(),
 			P95:               time.Duration(p95).String(),
 			RowsAffectedTotal: globalMetric.RowsAffectedTotal,
-			ErrCount:          errTotal,
+			ErrCount:          globalMetric.ErrorsTotal,
+			TopErrors:         getTopErrors(globalMetric.ErrMap),
 		},
-		IterationData: &IterationData{
-			TotalCount: globalMetric.IterationsTotal,
+		ThreadData: ThreadData{
+			ThreadCount:    globalMetric.ThreadsTotal,
+			IterationCount: globalMetric.IterationsTotal,
 		},
-		ThreadData: &ThreadData{
-			TotalCount: globalMetric.ThreadsTotal,
-		},
-		TopErrors: getTopErrors(globalMetric.ErrMap),
 	}
 }
 
@@ -119,24 +117,35 @@ func printColorReport(report *ReportData) {
 	fmt.Println()
 
 	fmt.Println(bold("Query"))
-	fmt.Printf("total: %s  failed: %s  qps: %s  affected rows: %s\n", cyan(report.QueryData.TotalCount), cyan(report.QueryData.ErrCount), cyan(report.QueryData.QPS), cyan(report.QueryData.RowsAffectedTotal))
-	fmt.Printf("min: %s  max: %s\n", cyan(report.QueryData.RespMin), cyan(report.QueryData.RespMax))
-	fmt.Printf("p50: %s  p90: %s  p95: %s\n", cyan(report.QueryData.P50), cyan(report.QueryData.P90), cyan(report.QueryData.P95))
-	fmt.Println()
+	fmt.Printf("total: %s success_rate: %s failed_rate: %s\n",
+		cyan(report.QueryData.TotalCount),
+		cyan(report.QueryData.SuccessRate),
+		cyan(report.QueryData.FailedRate))
 
-	fmt.Println(bold("Iteration"))
-	fmt.Printf("total: %s\n", cyan(report.IterationData.TotalCount))
+	fmt.Printf("qps: %s affected rows: %s\n",
+		cyan(report.QueryData.QPS),
+		cyan(report.QueryData.RowsAffectedTotal))
+
+	fmt.Printf("response time - min: %s  max: %s\n",
+		cyan(report.QueryData.RespMin),
+		cyan(report.QueryData.RespMax))
+	fmt.Printf("response time - p50: %s  p90: %s  p95: %s\n",
+		cyan(report.QueryData.P50),
+		cyan(report.QueryData.P90),
+		cyan(report.QueryData.P95))
 	fmt.Println()
 
 	fmt.Println(bold("Thread"))
-	fmt.Printf("total: %s\n", cyan(report.ThreadData.TotalCount))
+	fmt.Printf("thread count: %s\n", cyan(report.ThreadData.ThreadCount))
+	fmt.Printf("iteration count: %s\n", cyan(report.ThreadData.IterationCount))
 	fmt.Println()
 
 	fmt.Println(bold("Errors"))
-	if len(report.TopErrors) == 0 {
+	fmt.Printf("errors count: %s\n", cyan(report.QueryData.ErrCount))
+	if len(report.QueryData.TopErrors) == 0 {
 		fmt.Println(green("No errors recorded."))
 	} else {
-		for idx, err := range report.TopErrors {
+		for idx, err := range report.QueryData.TopErrors {
 			fmt.Printf("%d. %s\n", idx+1, err)
 		}
 	}

@@ -1,5 +1,5 @@
 /*
-LoadHound — Relentless load testing tool for SQL-oriented RDBMS.
+LoadHound — Relentless load testing tool for SQL databases.
 Copyright © 2025 Toichuev Ulukbek t.ulukbek01@gmail.com
 
 Licensed under the MIT License.
@@ -18,13 +18,13 @@ import (
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		config      *RunTestConfig
+		config      *RunConfig
 		expectError bool
 		errorMsg    string
 	}{
 		{
 			name: "valid config with duration",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -48,7 +48,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with iterations",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "mysql",
 					Dsn:    "user:pass@localhost/db",
@@ -72,7 +72,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with pacing equal to duration",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -96,7 +96,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "missing required db config",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				WorkflowConfig: &WorkflowConfig{
 					Scenarios: []*ScenarioConfig{
 						{
@@ -112,22 +112,22 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "DbConfig",
+			errorMsg:    "database configuration is nil",
 		},
 		{
 			name: "missing required workflow config",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
 				},
 			},
 			expectError: true,
-			errorMsg:    "WorkflowConfig",
+			errorMsg:    "workflow is nil",
 		},
 		{
 			name: "missing required driver in db config",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Dsn: "user:pass@localhost/db",
 				},
@@ -146,11 +146,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "Driver",
+			errorMsg:    "database driver is empty",
 		},
 		{
 			name: "missing required dsn in db config",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 				},
@@ -169,11 +169,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "Dsn",
+			errorMsg:    "database destination (dsn) is empty",
 		},
 		{
 			name: "missing required scenarios",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -187,7 +187,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "missing required threads in scenario",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -211,7 +211,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "missing required statement config",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -227,11 +227,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "statement cannot be nil",
+			errorMsg:    "statement is nil",
 		},
 		{
 			name: "missing required query in statement config",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -251,11 +251,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "query cannot be empty",
+			errorMsg:    "query is empty",
 		},
 		{
 			name: "neither duration nor iterations set",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -274,11 +274,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "either duration: 0s or iteration: 0 must be set",
+			errorMsg:    "either duration: (0s) or iteration: (0) must be set",
 		},
 		{
 			name: "both duration and iterations set",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -299,11 +299,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "duration: 30s and iteration: 100 are mutual exclusion",
+			errorMsg:    "duration: (30s) and iteration: (100) are mutual exclusion - specify only one",
 		},
 		{
 			name: "pacing greater than duration",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -324,11 +324,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "pacing: 15s cannot be more than test duration: 10s",
+			errorMsg:    "pacing: (15s) cannot be more than test duration: (10s)",
 		},
 		{
 			name: "multiple scenarios with mixed valid/invalid",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -357,11 +357,11 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "either duration: 0s or iteration: 0 must be set",
+			errorMsg:    "either duration: (0s) or iteration: (0) must be set",
 		},
 		{
 			name: "multiple valid scenarios",
-			config: &RunTestConfig{
+			config: &RunConfig{
 				DbConfig: &DbConfig{
 					Driver: "postgres",
 					Dsn:    "user:pass@localhost/db",
@@ -397,7 +397,7 @@ func TestValidateConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateConfig(tt.config)
+			err := validateConfig(tt.config)
 
 			if tt.expectError {
 				require.Error(t, err, "Expected an error but got none")
@@ -413,12 +413,12 @@ func TestValidateConfig(t *testing.T) {
 
 func TestValidateConfig_EdgeCases(t *testing.T) {
 	t.Run("nil config", func(t *testing.T) {
-		err := ValidateConfig(nil)
+		err := validateConfig(nil)
 		require.Error(t, err)
 	})
 
 	t.Run("config with optional fields", func(t *testing.T) {
-		config := &RunTestConfig{
+		config := &RunConfig{
 			DbConfig: &DbConfig{
 				Driver: "postgres",
 				Dsn:    "user:pass@localhost/db",
@@ -457,12 +457,12 @@ func TestValidateConfig_EdgeCases(t *testing.T) {
 			},
 		}
 
-		err := ValidateConfig(config)
+		err := validateConfig(config)
 		assert.NoError(t, err)
 	})
 
 	t.Run("zero duration with pacing should not error", func(t *testing.T) {
-		config := &RunTestConfig{
+		config := &RunConfig{
 			DbConfig: &DbConfig{
 				Driver: "postgres",
 				Dsn:    "user:pass@localhost/db",
@@ -483,7 +483,7 @@ func TestValidateConfig_EdgeCases(t *testing.T) {
 			},
 		}
 
-		err := ValidateConfig(config)
+		err := validateConfig(config)
 		assert.NoError(t, err)
 	})
 }
