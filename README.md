@@ -5,6 +5,7 @@
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 ![GitHub all releases](https://img.shields.io/github/downloads/Ulukbek-Toichuev/loadhound/total)
 ![CI](https://github.com/Ulukbek-Toichuev/loadhound/actions/workflows/go.yml/badge.svg)
+![Coverage](https://codecov.io/gh/Ulukbek-Toichuev/loadhound/branch/main/graph/badge.svg)
 
 > A fast, lightweight CLI tool for load testing SQL-based databases with flexible configuration and built-in random data generators.
 
