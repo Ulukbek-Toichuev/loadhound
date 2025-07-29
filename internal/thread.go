@@ -16,108 +16,84 @@ import (
 )
 
 type Thread struct {
-	Id       int
-	Metric   *LocalMetric
-	ExecFunc ExecFunc
-	Pacing   time.Duration
-	Query    string
-	Logger   *zerolog.Logger
+	Id                int
+	statPool          *ThreadStat
+	statementExecutor *StatementExecutor
+	logger            *zerolog.Logger
 }
 
-func NewThread(id int, metric *LocalMetric, execFunc ExecFunc, pacing time.Duration, query string, logger *zerolog.Logger) *Thread {
+func NewThread(id int, statPool *ThreadStat, statementExecutor *StatementExecutor, logger *zerolog.Logger) *Thread {
 	threadLogger := logger.With().Int("thread_id", id).Logger()
 	return &Thread{
-		Id:       id,
-		Metric:   metric,
-		ExecFunc: execFunc,
-		Pacing:   pacing,
-		Query:    query,
-		Logger:   &threadLogger,
+		Id:                id,
+		statPool:          statPool,
+		statementExecutor: statementExecutor,
+		logger:            &threadLogger,
 	}
 }
 
-func InitThreads(threads int, globalId *Id, execFunc ExecFunc, pacing time.Duration, query string, logger *zerolog.Logger, localMetricRec chan *LocalMetric) ([]*Thread, error) {
-	var preparedThreads = make([]*Thread, 0, threads)
-	for i := 0; i < threads; i++ {
-		m, err := NewLocalMetric()
-		if err != nil {
-			return nil, err
-		}
-		localMetricRec <- m
-		preparedThreads = append(preparedThreads, NewThread(globalId.GetId(), m, execFunc, pacing, query, logger))
-	}
-	logger.Debug().Int("threads_initialized", threads).Str("pacing", pacing.String()).Msg("Threads initialized successfully")
-	return preparedThreads, nil
-}
+func (t *Thread) RunOnDur(ctx context.Context, wg *sync.WaitGroup) {
+	defer func() {
+		wg.Done()
+		t.statPool.SetStopTime(time.Now())
+	}()
 
-func (t *Thread) RunOnDur(ctx context.Context, wg *sync.WaitGroup, startAt time.Time) {
-	defer wg.Done()
-	defer t.Metric.Stop()
-	t.Metric.StartAt(startAt)
-	t.Logger.Debug().Time("start_time", startAt).Msg("Thread started (duration-based)")
+	startTime := time.Now()
+	t.statPool.SetStartTime(startTime)
+	t.logger.Debug().Time("start_time", startTime).Msg("Thread started (duration-based)")
 
 	executionCount := 0
 	for {
 		select {
 		case <-ctx.Done():
-			t.Logger.Debug().Int("executions_completed", executionCount).Msg("Thread stopped due to context cancellation")
+			t.logger.Debug().Int("executions_completed", executionCount).Msg("Thread stopped due to context cancellation")
 			return
 		default:
 		}
 		t.exec(ctx)
 		executionCount++
-		t.Metric.AddIters()
+		t.statPool.AddIter()
 
 		if executionCount%100 == 0 {
-			t.Logger.Debug().Int("executions_completed", executionCount).Msg("Thread execution progress")
+			t.logger.Debug().Int("executions_completed", executionCount).Msg("Thread execution progress")
 		}
 	}
 }
 
-func (t *Thread) RunOnIter(ctx context.Context, wg *sync.WaitGroup, startAt time.Time, iterations int) {
-	defer wg.Done()
-	defer t.Metric.Stop()
-	t.Metric.StartAt(startAt)
-	t.Logger.Debug().Time("start_time", startAt).Int("total_iterations", iterations).Msg("Thread started (iteration-based)")
+func (t *Thread) RunOnIter(ctx context.Context, wg *sync.WaitGroup, iterations int) {
+	defer func() {
+		wg.Done()
+		t.statPool.SetStopTime(time.Now())
+	}()
+
+	startTime := time.Now()
+	t.statPool.SetStartTime(startTime)
+	t.logger.Debug().Time("start_time", startTime).Int("total_iterations", iterations).Msg("Thread started (iteration-based)")
 
 	for iter := 0; iter < iterations; iter++ {
 		select {
 		case <-ctx.Done():
-			t.Logger.Debug().Int("completed_iterations", iter).Int("total_iterations", iterations).Msg("Thread stopped due to context cancellation")
+			t.logger.Debug().Int("completed_iterations", iter).Int("total_iterations", iterations).Msg("Thread stopped due to context cancellation")
 			return
 		default:
 		}
 		t.exec(ctx)
-		t.Metric.AddIters()
+		t.statPool.AddIter()
 
 		if iterations >= 10 && (iter+1)%(iterations/10) == 0 {
-			t.Logger.Debug().Int("completed_iterations", iter+1).Int("total_iterations", iterations).Float64("progress_percent", float64(iter+1)/float64(iterations)*100).Msg("Thread iteration progress")
+			t.logger.Debug().Int("completed_iterations", iter+1).Int("total_iterations", iterations).Float64("progress_percent", float64(iter+1)/float64(iterations)*100).Msg("Thread iteration progress")
 		}
 	}
-	t.Logger.Debug().Int("completed_iterations", iterations).Msg("Thread completed all iterations")
+	t.logger.Debug().Int("completed_iterations", iterations).Msg("Thread completed all iterations")
 }
 
 func (t *Thread) exec(ctx context.Context) {
 	start := time.Now()
-	qm := t.ExecFunc(ctx, t.Query)
-	t.Metric.Submit(qm)
-	if qm.Err != nil {
-		t.Logger.Error().Err(qm.Err).Str("duration", qm.ResponseTime.String()).Str("query", t.Query).Msg("Query execution failed")
+	queryResult := t.statementExecutor.fn(ctx)
+	t.statPool.SubmitQueryResult(queryResult)
+	if queryResult.Err != nil {
+		t.logger.Error().Err(queryResult.Err).Str("duration", queryResult.ResponseTime.String()).Str("query", t.statementExecutor.cfg.Query).Msg("Query execution failed")
 	}
-	t.Logger.Trace().Str("duration", qm.ResponseTime.String()).Msg("Query executed successfully")
-	evaluatePacing(start, t.Pacing)
-}
-
-func evaluatePacing(start time.Time, pacing time.Duration) {
-	if pacing == 0 {
-		return
-	}
-	elapsed := time.Since(start)
-	if elapsed >= pacing {
-		return
-	}
-	remaining := pacing - elapsed
-	if remaining > 0 {
-		time.Sleep(remaining)
-	}
+	t.logger.Trace().Str("duration", queryResult.ResponseTime.String()).Msg("Query executed successfully")
+	EvaluatePacing(start, t.statementExecutor.pacing)
 }
