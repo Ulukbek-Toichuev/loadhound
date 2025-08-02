@@ -89,11 +89,11 @@ func (t *Thread) RunOnIter(ctx context.Context, wg *sync.WaitGroup, iterations i
 
 func (t *Thread) exec(ctx context.Context) {
 	start := time.Now()
-	queryResult := t.statementExecutor.fn(ctx)
+	queryResult := t.statementExecutor.Fn(ctx)
 	t.statPool.SubmitQueryResult(queryResult)
 	if queryResult.Err != nil {
-		t.logger.Error().Err(queryResult.Err).Str("duration", queryResult.ResponseTime.String()).Str("query", t.statementExecutor.cfg.Query).Msg("Query execution failed")
+		t.logger.Error().Err(queryResult.Err).Str("duration", queryResult.ResponseTime.String()).Str("query", t.statementExecutor.Query).Msg("Query execution failed")
 	}
 	t.logger.Trace().Str("duration", queryResult.ResponseTime.String()).Msg("Query executed successfully")
-	EvaluatePacing(start, t.statementExecutor.pacing)
+	EvaluatePacing(start, t.statementExecutor.Pacing)
 }

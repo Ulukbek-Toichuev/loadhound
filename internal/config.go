@@ -135,6 +135,7 @@ func GetConfig(path string) (*RunConfig, error) {
 	return &cfg, nil
 }
 
+// Read data from path to config
 func readConfigFile(path string, out *RunConfig) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -146,6 +147,7 @@ func readConfigFile(path string, out *RunConfig) error {
 	return nil
 }
 
+// Validate config
 func validateConfig(cfg *RunConfig) error {
 	if cfg == nil {
 		return errors.New("configuration is nil")

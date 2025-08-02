@@ -186,6 +186,20 @@ func TestValidateConfig(t *testing.T) {
 			errorMsg:    "non scenarios set for test",
 		},
 		{
+			name: "missing required scenarios_v2",
+			config: &RunConfig{
+				DbConfig: &DbConfig{
+					Driver: "postgres",
+					Dsn:    "user:pass@localhost/db",
+				},
+				WorkflowConfig: &WorkflowConfig{
+					Scenarios: nil,
+				},
+			},
+			expectError: true,
+			errorMsg:    "non scenarios set for test",
+		},
+		{
 			name: "missing required threads in scenario",
 			config: &RunConfig{
 				DbConfig: &DbConfig{

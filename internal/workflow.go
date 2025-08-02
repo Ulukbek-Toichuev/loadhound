@@ -10,6 +10,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -40,7 +41,7 @@ func (w *Workflow) Run(ctx context.Context) error {
 	// Get SQL-client instance
 	client, err := w.getSQLClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get sql-client: %w", err)
 	}
 	defer client.Close()
 
@@ -60,9 +61,9 @@ func (w *Workflow) Run(ctx context.Context) error {
 
 		// Get statement for each scenario
 		statementExecutor, err := NewStatementExecutor(ctx, cfg.Pacing, cfg.StatementConfig, client)
-			if err != nil {
+		if err != nil {
 			return fmt.Errorf("failed to create statement executor: %w", err)
-			}
+		}
 		defer func() {
 			if err := statementExecutor.Close(); err != nil {
 				scLogger.Panic().Err(err).Msg("Failed to close prepared statement")
@@ -95,16 +96,15 @@ func (w *Workflow) Run(ctx context.Context) error {
 	globalMetric := NewGlobalMetric(threadStats)
 	globalMetric.ThreadsTotal += threadCount
 
-	globalMetric.StartAt = time.Now()
 	g, ctx := errgroup.WithContext(ctx)
+	globalMetric.StartAt = time.Now()
 	for _, sc := range scenarios {
 		g.Go(func() error {
 			return sc.Run(ctx)
 		})
 	}
 	if err := g.Wait(); err != nil {
-		w.logger.Error().Err(err).Msg("One or more scenarios failed")
-		return err
+		return fmt.Errorf("one or more scenarios failed: %w", err)
 	}
 	endAt := time.Now()
 	globalMetric.EndAt = endAt
@@ -119,7 +119,6 @@ func (w *Workflow) Run(ctx context.Context) error {
 func (w *Workflow) getSQLClient(ctx context.Context) (*SQLClient, error) {
 	client, err := NewSQLClient(ctx, w.cfg.DbConfig)
 	if err != nil {
-		w.logger.Error().Err(err).Msg("Failed to create SQL client")
 		return nil, err
 	}
 	w.logger.Info().Str("driver", w.cfg.DbConfig.Driver).Str("dsn", w.cfg.DbConfig.Dsn).Msg("Database connection established")
@@ -134,8 +133,6 @@ func calculateRampUpInterval(rampUp time.Duration, threads int) time.Duration {
 	intervalNanos := rampUp / time.Duration(threads)
 	interval := time.Duration(intervalNanos)
 
-	// 50 000 000
-	// 500 000
 	// Apply minimum interval protection only
 	if interval < rampUpMin {
 		// Log warning that ramp-up will take longer than requested

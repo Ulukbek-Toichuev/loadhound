@@ -66,6 +66,7 @@ func main() {
 
 	// Run workflow
 	if err := workflow.Run(globalCtx); err != nil {
+		logger.Error().Err(err).Msg("Get error from workflow")
 		fatal(err)
 	}
 }
