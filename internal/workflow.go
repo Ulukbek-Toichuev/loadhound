@@ -10,6 +10,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -40,7 +41,7 @@ func (w *Workflow) Run(ctx context.Context) error {
 	// Get SQL-client instance
 	client, err := w.getSQLClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get sql-client: %w", err)
 	}
 	defer client.Close()
 
@@ -58,30 +59,18 @@ func (w *Workflow) Run(ctx context.Context) error {
 		// Init new logger for scenario from base logger
 		scLogger := w.logger.With().Str("scenario_name", cfg.Name).Int("scenario_id", idx).Logger()
 
-		// Get ExecFunc
-		var execFunc ExecFunc
-		if len(cfg.StatementConfig.Args) != 0 {
-			generators, err := GetGenerators(cfg.StatementConfig.Args)
-			if err != nil {
-				return err
-			}
-			stmt, err := client.Prepare(ctx, cfg.StatementConfig.Query)
-			if err != nil {
-				return err
-			}
-			defer stmt.Close()
-			execFunc, err = getStmtFunc(stmt, cfg.StatementConfig.Query, generators)
-			if err != nil {
-				return err
-			}
-		} else {
-			execFunc, err = getExecFunc(client, cfg.StatementConfig.Query)
-			if err != nil {
-				return err
-			}
+		// Get statement for each scenario
+		statementExecutor, err := NewStatementExecutor(ctx, cfg.Pacing, cfg.StatementConfig, client)
+		if err != nil {
+			return fmt.Errorf("failed to create statement executor: %w", err)
 		}
-		// Initialize threads for scenario
-		statementExecutor := NewStatementExecutor(execFunc, cfg.Pacing, cfg.StatementConfig)
+		defer func() {
+			if err := statementExecutor.Close(); err != nil {
+				scLogger.Panic().Err(err).Msg("Failed to close prepared statement")
+			}
+		}()
+
+		// Get prepared threads list and thread metric object linked each thread
 		pth, ths, err := InitThreads(cfg.Threads, sharedId, statementExecutor, &scLogger)
 		if err != nil {
 			return err
@@ -107,16 +96,15 @@ func (w *Workflow) Run(ctx context.Context) error {
 	globalMetric := NewGlobalMetric(threadStats)
 	globalMetric.ThreadsTotal += threadCount
 
-	globalMetric.StartAt = time.Now()
 	g, ctx := errgroup.WithContext(ctx)
+	globalMetric.StartAt = time.Now()
 	for _, sc := range scenarios {
 		g.Go(func() error {
 			return sc.Run(ctx)
 		})
 	}
 	if err := g.Wait(); err != nil {
-		w.logger.Error().Err(err).Msg("One or more scenarios failed")
-		return err
+		return fmt.Errorf("one or more scenarios failed: %w", err)
 	}
 	endAt := time.Now()
 	globalMetric.EndAt = endAt
@@ -131,7 +119,6 @@ func (w *Workflow) Run(ctx context.Context) error {
 func (w *Workflow) getSQLClient(ctx context.Context) (*SQLClient, error) {
 	client, err := NewSQLClient(ctx, w.cfg.DbConfig)
 	if err != nil {
-		w.logger.Error().Err(err).Msg("Failed to create SQL client")
 		return nil, err
 	}
 	w.logger.Info().Str("driver", w.cfg.DbConfig.Driver).Str("dsn", w.cfg.DbConfig.Dsn).Msg("Database connection established")
@@ -146,8 +133,6 @@ func calculateRampUpInterval(rampUp time.Duration, threads int) time.Duration {
 	intervalNanos := rampUp / time.Duration(threads)
 	interval := time.Duration(intervalNanos)
 
-	// 50 000 000
-	// 500 000
 	// Apply minimum interval protection only
 	if interval < rampUpMin {
 		// Log warning that ramp-up will take longer than requested
@@ -157,20 +142,60 @@ func calculateRampUpInterval(rampUp time.Duration, threads int) time.Duration {
 }
 
 type StatementExecutor struct {
-	fn     ExecFunc
-	pacing time.Duration
-	cfg    *StatementConfig
+	Query      string
+	Fn         ExecFunc
+	Pacing     time.Duration
+	stmtClient *PreparedStatement
 }
 
-func NewStatementExecutor(fn ExecFunc, pacing time.Duration, cfg *StatementConfig) *StatementExecutor {
-	return &StatementExecutor{
-		fn:     fn,
-		pacing: pacing,
-		cfg:    cfg,
+func (stmtExec *StatementExecutor) Close() error {
+	if stmtExec.stmtClient != nil {
+		return stmtExec.stmtClient.Close()
 	}
+	return nil
+}
+
+func NewStatementExecutor(ctx context.Context, pacing time.Duration, cfg *StatementConfig, client *SQLClient) (*StatementExecutor, error) {
+	execFunc, stmtClient, err := NewExecFunc(ctx, client, cfg.Query, cfg.Args)
+	if err != nil {
+		return nil, err
+	}
+	var stmtExec = &StatementExecutor{
+		Query:      cfg.Query,
+		Fn:         execFunc,
+		Pacing:     pacing,
+		stmtClient: stmtClient,
+	}
+	return stmtExec, nil
 }
 
 type ExecFunc func(ctx context.Context) *QueryResult
+
+func NewExecFunc(ctx context.Context, client *SQLClient, query, args string) (ExecFunc, *PreparedStatement, error) {
+	// If query is parametrizied
+	// Create prepared statement
+	// Get built-in functions
+	if args != "" {
+		generators, err := GetGenerators(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		stmt, err := client.Prepare(ctx, query)
+		if err != nil {
+			return nil, nil, err
+		}
+		execFunc, err := getStmtFunc(stmt, query, generators)
+		if err != nil {
+			return nil, nil, err
+		}
+		return execFunc, stmt, nil
+	}
+	execFunc, err := getExecFunc(client, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	return execFunc, nil, nil
+}
 
 // If SQL query is parametrizied, return statement function
 func getStmtFunc(s *PreparedStatement, query string, generators []GeneratorFunc) (ExecFunc, error) {

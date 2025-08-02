@@ -2,7 +2,7 @@
 
 ![Go Version](https://img.shields.io/badge/Go-1.21+-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Status](https://img.shields.io/badge/status-alpha-orange)
+![Status](https://img.shields.io/badge/status-stable-green)
 ![GitHub all releases](https://img.shields.io/github/downloads/Ulukbek-Toichuev/loadhound/total)
 ![CI](https://github.com/Ulukbek-Toichuev/loadhound/actions/workflows/go.yml/badge.svg)
 ![Coverage](https://codecov.io/gh/Ulukbek-Toichuev/loadhound/branch/main/graph/badge.svg)
@@ -16,7 +16,7 @@
 go install github.com/Ulukbek-Toichuev/loadhound@latest
 
 # Run a load test
-loadhound --run-test my-test-scenario.toml
+loadhound -run my-test-scenario.toml
 ```
 
 ## Table of Contents
@@ -87,6 +87,7 @@ pacing="1s"
 [workflow.scenarios.statement]
 name="select"
 query="select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;"
+# path_to_query="query.sql"
 args="randBool, randIntRange 100 1000"
 
 [output.report]
