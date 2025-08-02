@@ -88,9 +88,10 @@ func (sc *ScenarioConfig) MarshalJSON() ([]byte, error) {
 
 // StatementConfig holds the SQL query definition used by each scenario.
 type StatementConfig struct {
-	Name  string `toml:"name" json:"name"`   // Optional label
-	Query string `toml:"query" json:"query"` // SQL query text
-	Args  string `toml:"args" json:"args"`   // Optional arguments for parameterized queries
+	Name        string `toml:"name" json:"name"`                   // Optional label
+	PathToQuery string `toml:"path_to_query" json:"path_to_query"` // Path to file which contains query
+	Query       string `toml:"query" json:"query"`                 // SQL query text
+	Args        string `toml:"args" json:"args"`                   // Optional arguments for parameterized queries
 }
 
 // OutputConfig specifies how test results are reported and logged.
@@ -119,6 +120,17 @@ func GetConfig(path string) (*RunConfig, error) {
 	}
 	if err := validateConfig(&cfg); err != nil {
 		return nil, err
+	}
+
+	// Save query from file into field 'query' in statement config
+	for _, sc := range cfg.WorkflowConfig.Scenarios {
+		if sc.StatementConfig.PathToQuery != "" {
+			data, err := os.ReadFile(sc.StatementConfig.PathToQuery)
+			if err != nil {
+				return nil, err
+			}
+			sc.StatementConfig.Query = string(data)
+		}
 	}
 	return &cfg, nil
 }
@@ -186,8 +198,14 @@ func validateConfig(cfg *RunConfig) error {
 		if sc.StatementConfig == nil {
 			return errors.New("statement is nil")
 		}
-		if sc.StatementConfig.Query == "" {
+
+		// Validate statement query source
+		if sc.StatementConfig.Query == "" && sc.StatementConfig.PathToQuery == "" {
 			return errors.New("query is empty")
+		}
+		if sc.StatementConfig.Query != "" && sc.StatementConfig.PathToQuery != "" {
+			return fmt.Errorf("query: (%s) and path to file with query: (%s) are mutual exclusion - specify only one",
+				sc.StatementConfig.Query, sc.StatementConfig.PathToQuery)
 		}
 	}
 	return nil

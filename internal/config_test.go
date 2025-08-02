@@ -393,6 +393,92 @@ func TestValidateConfig(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "empty query validate",
+			config: &RunConfig{
+				DbConfig: &DbConfig{
+					Driver: "postgres",
+					Dsn:    "user:pass@localhost/db",
+				},
+				WorkflowConfig: &WorkflowConfig{
+					Scenarios: []*ScenarioConfig{
+						{
+							Name:     "scenario_1",
+							Duration: 30 * time.Second,
+							Threads:  5,
+							Pacing:   2 * time.Second,
+							StatementConfig: &StatementConfig{
+								Name:        "select_test",
+								Query:       "",
+								PathToQuery: "",
+							},
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "query is empty",
+		},
+		{
+			name: "both query built-in and path_to_query set",
+			config: &RunConfig{
+				DbConfig: &DbConfig{
+					Driver: "postgres",
+					Dsn:    "user:pass@localhost/db",
+				},
+				WorkflowConfig: &WorkflowConfig{
+					Scenarios: []*ScenarioConfig{
+						{
+							Name:     "scenario_1",
+							Duration: 30 * time.Second,
+							Threads:  5,
+							Pacing:   2 * time.Second,
+							StatementConfig: &StatementConfig{
+								Name:        "select_test",
+								Query:       "SELECT * FROM users",
+								PathToQuery: "/path/to/query.sql",
+							},
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "query: (SELECT * FROM users) and path to file with query: (/path/to/query.sql) are mutual exclusion - specify only one",
+		},
+		{
+			name: "multiple query source scenarios",
+			config: &RunConfig{
+				DbConfig: &DbConfig{
+					Driver: "postgres",
+					Dsn:    "user:pass@localhost/db",
+				},
+				WorkflowConfig: &WorkflowConfig{
+					Scenarios: []*ScenarioConfig{
+						{
+							Name:     "scenario_1",
+							Duration: 30 * time.Second,
+							Threads:  5,
+							Pacing:   2 * time.Second,
+							StatementConfig: &StatementConfig{
+								Name:  "select_test",
+								Query: "SELECT * FROM users",
+							},
+						},
+						{
+							Name:       "scenario_2",
+							Iterations: 100,
+							Threads:    3,
+							StatementConfig: &StatementConfig{
+								Name:        "insert_test",
+								PathToQuery: "/path/to/query.sql",
+								Args:        "Test User",
+							},
+						},
+					},
+				},
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {

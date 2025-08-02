@@ -87,6 +87,7 @@ pacing="1s"
 [workflow.scenarios.statement]
 name="select"
 query="select * from loadhound_table lt where lt.rand_bool = $1 and lt.rand_int = $2;"
+# path_to_query="query.sql"
 args="randBool, randIntRange 100 1000"
 
 [output.report]
