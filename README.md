@@ -3,9 +3,7 @@
 ![Go Version](https://img.shields.io/badge/Go-1.21+-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Status](https://img.shields.io/badge/status-stable-green)
-![GitHub all releases](https://img.shields.io/github/downloads/Ulukbek-Toichuev/loadhound/total)
 ![CI](https://github.com/Ulukbek-Toichuev/loadhound/actions/workflows/go.yml/badge.svg)
-![Coverage](https://codecov.io/gh/Ulukbek-Toichuev/loadhound/branch/main/graph/badge.svg)
 
 > A fast, lightweight CLI tool for load testing SQL databases with flexible configuration and built-in random data generators.
 
