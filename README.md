@@ -63,6 +63,76 @@ go build -o loadhound cmd/main.go
 
 Download pre-compiled binaries from the [releases page](https://github.com/Ulukbek-Toichuev/loadhound/releases).
 
+## Configuration Reference
+
+### Database Configuration (`[db]`)
+
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| `driver` | string | Yes | Database driver type | `"postgres"`, `"mysql"` |
+| `dsn` | string | Yes | Database connection string | `"postgres://user:pass@host:port/db?sslmode=disable"` |
+
+#### Connection Pool Configuration (`[db.conn_pool]`)
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `max_open_connections` | int | No | Maximum number of open connections to the database | Database driver default | `10` |
+| `max_idle_connections` | int | No | Maximum number of idle connections in the pool | Database driver default | `5` |
+| `conn_max_idle_time` | duration | No | Maximum time a connection can remain idle | Database driver default | `"30m"` |
+| `conn_max_life_time` | duration | No | Maximum lifetime of a connection | Database driver default | `"1h"` |
+
+### Workflow Configuration (`[workflow]`)
+
+#### Scenarios (`[[workflow.scenarios]]`)
+
+| Field | Type | Required | Description | Constraints | Example |
+|-------|------|----------|-------------|-------------|---------|
+| `name` | string | No | Human-readable scenario name | - | `"select_scenario"` |
+| `iterations` | int | No* | Number of iterations per thread | Must be > 0 if duration not set | `100` |
+| `duration` | duration | No* | Total runtime for the scenario | Mutually exclusive with iterations | `"30s"`, `"5m"` |
+| `threads` | int | Yes | Number of concurrent threads | Must be >= 1 | `4` |
+| `pacing` | duration | No | Delay between iterations within each thread | Cannot exceed duration | `"1s"`, `"500ms"` |
+| `ramp_up` | duration | No | Time to gradually increase from 0 to N threads | - | `"10s"` |
+
+*Either `iterations` or `duration` must be specified, but not both.
+
+#### Statement Configuration (`[workflow.scenarios.statement]`)
+
+| Field | Type | Required | Description | Constraints | Example |
+|-------|------|----------|-------------|-------------|---------|
+| `name` | string | No | Optional label for the statement | - | `"select_users"` |
+| `query` | string | No* | SQL query to execute | Mutually exclusive with path_to_query | `"SELECT * FROM users WHERE id = $1"` |
+| `path_to_query` | string | No* | Path to file containing the SQL query | Mutually exclusive with query | `"queries/select.sql"` |
+| `args` | string | No | Parameters for prepared statements using built-in functions | - | `"randBool, randIntRange 1 100"` |
+
+*Either `query` or `path_to_query` must be specified, but not both.
+
+### Output Configuration (`[output]`)
+
+#### Report Configuration (`[output.report]`)
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `to_file` | bool | No | Save report to JSON file | `false` | `true` |
+| `to_console` | bool | No | Print report to console | `false` | `true` |
+
+#### Log Configuration (`[output.log]`)
+
+| Field | Type | Required | Description | Valid Values | Default | Example |
+|-------|------|----------|-------------|--------------|---------|---------|
+| `level` | string | No | Logging level | `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`, `"fatal"`, `"panic"` | `"info"` | `"debug"` |
+| `to_file` | bool | No | Save logs to file | - | `false` | `true` |
+| `to_console` | bool | No | Print logs to console | - | `false` | `true` |
+
+### Duration Format
+
+Duration values use Go's duration format:
+
+- `"300ms"` - 300 milliseconds
+- `"1.5s"` - 1.5 seconds  
+- `"2m"` - 2 minutes
+- `"1h30m"` - 1 hour 30 minutes
+
 ## Example Scenario
 
 ```toml
@@ -104,21 +174,21 @@ level="info"
 
 ### CLI Flags
 
-Flag | Description
------|------------
-`-run` | Path to your `.toml` scenario file
-`-version` | Print LoadHound version
+| Flag | Description |
+| -----|------------ |
+| `-run` | Path to your `.toml` scenario file |
+| `-version` | Print LoadHound version |
 
 ### Built-in parameter functions
 
-Function | Description | Return type
----------|-------------|-------------
-`randBool` | Returns `true` or `false` | `bool`
-`randIntRange(a, b)` | Random integer in range | `int`
-`randFloat64InRange(a, b)` | Random float in range | `float64`
-`randUUID` | Random UUID string | `string`
-`randStrRange(a, b)` | Random string of given length | `string`
-`getTimestampNow` | Current timestamp | `int`
+| Function | Description | Return type |
+| ---------|-------------|------------- |
+| `randBool` | Returns `true` or `false` | `bool` |
+| `randIntRange(a, b)` | Random integer in range | `int` |
+| `randFloat64InRange(a, b)` | Random float in range | `float64` |
+| `randUUID` | Random UUID string | `string` |
+| `randStrRange(a, b)` | Random string of given length | `string` |
+| `getTimestampNow` | Current timestamp | `int` |
 
 ### Logs
 
@@ -238,10 +308,10 @@ errors count: 2
   
 ## Supported Databases
 
-Databases | Driver
-----------|-----------
-MySQL | github.com/go-sql-driver/mysql
-PostgreSQL | github.com/lib/pq
+| Databases | Driver |
+| ----------|----------- |
+| MySQL | github.com/go-sql-driver/mysql |
+| PostgreSQL | github.com/lib/pq |
 
 ## License
 
