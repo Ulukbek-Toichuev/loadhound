@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -137,7 +139,11 @@ func GetConfig(path string) (*RunConfig, error) {
 
 // Read data from path to config
 func readConfigFile(path string, out *RunConfig) error {
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	if strings.Contains(cleanPath, "..") {
+		return errors.New("invalid file path: path traversal detected")
+	}
+	data, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return err
 	}

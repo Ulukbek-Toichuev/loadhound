@@ -268,7 +268,8 @@ func TestThreadStat_SubmitQueryResult(t *testing.T) {
 			ts, err := NewThreadStat()
 			require.NoError(t, err)
 
-			ts.SubmitQueryResult(tt.queryResult)
+			err = ts.SubmitQueryResult(tt.queryResult)
+			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectedQueries, ts.queriesTotal)
 			assert.Equal(t, tt.expectedRows, ts.rowsAffected)
@@ -296,7 +297,8 @@ func TestThreadStat_SubmitQueryResult_MultipleResults(t *testing.T) {
 	}
 
 	for _, result := range results {
-		ts.SubmitQueryResult(result)
+		err := ts.SubmitQueryResult(result)
+		require.NoError(t, err)
 	}
 
 	assert.Equal(t, int64(5), ts.queriesTotal)
@@ -372,8 +374,10 @@ func TestGlobalMetric_Collect(t *testing.T) {
 			name: "collect from single thread",
 			setupThreads: func() []*ThreadStat {
 				ts, _ := NewThreadStat()
-				ts.SubmitQueryResult(&QueryResult{RowsAffected: 10, ResponseTime: 100 * time.Millisecond})
-				ts.SubmitQueryResult(&QueryResult{RowsAffected: 5, ResponseTime: 150 * time.Millisecond})
+				err := ts.SubmitQueryResult(&QueryResult{RowsAffected: 10, ResponseTime: 100 * time.Millisecond})
+				require.NoError(t, err)
+				err = ts.SubmitQueryResult(&QueryResult{RowsAffected: 5, ResponseTime: 150 * time.Millisecond})
+				require.NoError(t, err)
 				return []*ThreadStat{ts}
 			},
 			validate: func(t *testing.T, gm *GlobalMetric) {
@@ -387,11 +391,13 @@ func TestGlobalMetric_Collect(t *testing.T) {
 			name: "collect from multiple threads",
 			setupThreads: func() []*ThreadStat {
 				ts1, _ := NewThreadStat()
-				ts1.SubmitQueryResult(&QueryResult{RowsAffected: 1, ResponseTime: 50 * time.Millisecond})
+				err := ts1.SubmitQueryResult(&QueryResult{RowsAffected: 1, ResponseTime: 50 * time.Millisecond})
+				require.NoError(t, err)
 				ts1.AddIter()
 
 				ts2, _ := NewThreadStat()
-				ts2.SubmitQueryResult(&QueryResult{RowsAffected: 2, ResponseTime: 75 * time.Millisecond, Err: errors.New("test error")})
+				err = ts2.SubmitQueryResult(&QueryResult{RowsAffected: 2, ResponseTime: 75 * time.Millisecond, Err: errors.New("test error")})
+				require.NoError(t, err)
 				ts2.AddIter()
 				ts2.AddIter()
 
@@ -422,7 +428,8 @@ func TestGlobalMetric_Collect(t *testing.T) {
 			name: "collect with nil thread in slice",
 			setupThreads: func() []*ThreadStat {
 				ts, _ := NewThreadStat()
-				ts.SubmitQueryResult(&QueryResult{RowsAffected: 5, ResponseTime: 100 * time.Millisecond})
+				err := ts.SubmitQueryResult(&QueryResult{RowsAffected: 5, ResponseTime: 100 * time.Millisecond})
+				require.NoError(t, err)
 				return []*ThreadStat{ts, nil}
 			},
 			validate: func(t *testing.T, gm *GlobalMetric) {
@@ -633,6 +640,7 @@ func BenchmarkThreadStat_SubmitQueryResult(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ts.SubmitQueryResult(result)
+		err := ts.SubmitQueryResult(result)
+		require.NoError(b, err)
 	}
 }

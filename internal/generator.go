@@ -142,21 +142,21 @@ func parseFloat64(args ...string) ([]float64, error) {
 }
 
 func RandBool() bool {
-	return rand.IntN(2) == 1
+	return rand.IntN(2) == 1 // #nosec G404 -- Non-security random generation for test data
 }
 
 func RandIntRange(min, max int) int {
 	if min >= max {
 		return min // Fallback for invalid range
 	}
-	return rand.IntN(max-min) + min
+	return rand.IntN(max-min) + min // #nosec G404 -- Non-security random generation for test data
 }
 
 func RandFloat64InRange(min, max float64) float64 {
 	if min >= max {
 		return min // Fallback for invalid range
 	}
-	return rand.Float64()*(max-min) + min
+	return rand.Float64()*(max-min) + min // #nosec G404 -- Non-security random generation for test data
 }
 
 func RandUUID() string {
@@ -176,14 +176,14 @@ func RandStringInRange(min, max int) string {
 		min = 0
 	}
 
-	n := rand.IntN(max-min+1) + min
+	n := rand.IntN(max-min+1) + min // #nosec G404 -- Non-security random generation for test data
 	if n == 0 {
 		return ""
 	}
 
 	b := make([]byte, n)
 	for i := 0; i < len(b); i++ {
-		b[i] = letters[rand.IntN(len(letters))]
+		b[i] = letters[rand.IntN(len(letters))] // #nosec G404 -- Non-security random generation for test data
 	}
 	return string(b)
 }

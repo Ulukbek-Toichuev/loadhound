@@ -34,11 +34,10 @@ func GetLogger(cfg *OutputConfig) (*zerolog.Logger, error) {
 
 	var f *os.File
 	if cfg.LogConfig.ToFile {
-		var (
-			err      error
-			filename string = fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
-		)
-		f, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		var err error
+		filename := fmt.Sprintf("loadhound_%s.log", time.Now().Format(time.RFC3339))
+		// #nosec G304 -- filename is generated internally, not from user input
+		f, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, err
 		}

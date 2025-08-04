@@ -9,14 +9,13 @@ package internal
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/caio/go-tdigest/v4"
 )
 
-const (
-	tdigestCompression = 100.0
-)
+const tdigestCompression = 100.0
 
 type ThreadStat struct {
 	// TDigest for percentile calculations of response time
@@ -63,9 +62,9 @@ func (t *ThreadStat) AddIter() {
 	t.iterationsTotal++
 }
 
-func (t *ThreadStat) SubmitQueryResult(q *QueryResult) {
+func (t *ThreadStat) SubmitQueryResult(q *QueryResult) error {
 	if q == nil {
-		return
+		return nil
 	}
 	t.rowsAffected += q.RowsAffected
 	t.queriesTotal++
@@ -73,7 +72,7 @@ func (t *ThreadStat) SubmitQueryResult(q *QueryResult) {
 		t.errorsTotal++
 		t.errMap[q.Err.Error()]++
 	}
-	t.td.Add(float64(q.ResponseTime))
+	return t.td.Add(float64(q.ResponseTime))
 }
 
 type GlobalMetric struct {
@@ -113,7 +112,9 @@ func (gm *GlobalMetric) Collect() {
 		}
 
 		// Merge TDigest
-		gm.Td.Merge(threadStat.td)
+		if err := gm.Td.Merge(threadStat.td); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 
 		// Aggregate counters
 		gm.RowsAffectedTotal += threadStat.rowsAffected
