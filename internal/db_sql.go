@@ -11,6 +11,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -160,7 +162,11 @@ func countRows(rows *sql.Rows) (int64, error) {
 	if rows == nil {
 		return 0, errors.New("rows is nil")
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	}()
 	var count int64
 	for rows.Next() {
 		count++

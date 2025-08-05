@@ -56,7 +56,8 @@ func GenerateReport(cfg *RunConfig, globalMetric *GlobalMetric) error {
 
 	if reportCfg.ToFile {
 		filename := fmt.Sprintf("loadhound_report_%s.json", time.Now().Format(time.RFC3339))
-		f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		// #nosec G304 -- filename is generated internally, not from user input
+		f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			return err
 		}
@@ -66,7 +67,9 @@ func GenerateReport(cfg *RunConfig, globalMetric *GlobalMetric) error {
 			return err
 		}
 
-		f.Write(data)
+		if _, err := f.Write(data); err != nil {
+			return err
+		}
 		if err := f.Close(); err != nil {
 			return err
 		}

@@ -43,7 +43,11 @@ func (w *Workflow) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get sql-client: %w", err)
 	}
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			w.logger.Fatal().Err(err).Msg("failed to close sql-client")
+		}
+	}()
 
 	var (
 		cfgs        = w.cfg.WorkflowConfig.Scenarios
