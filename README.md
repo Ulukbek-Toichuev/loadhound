@@ -4,6 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Status](https://img.shields.io/badge/status-stable-green)
 ![CI](https://github.com/Ulukbek-Toichuev/loadhound/actions/workflows/go.yml/badge.svg)
+![coverage](https://raw.githubusercontent.com/Ulukbek-Toichuev/loadhound/badges/.badges/main/coverage.svg)
 
 > A fast, lightweight CLI tool for load testing SQL databases with flexible configuration and built-in random data generators.
 
