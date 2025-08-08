@@ -14,20 +14,18 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func InitThreads(threads int, sharedId *SharedId, statementExecutor *StatementExecutor, logger *zerolog.Logger) ([]*Thread, []*ThreadStat, error) {
+func InitThreads(threads int, sharedId *SharedId, statementExecutor *StatementExecutor, logger *zerolog.Logger) ([]*Thread, error) {
 	var (
-		threadStats     = make([]*ThreadStat, 0)
 		preparedThreads = make([]*Thread, 0)
 	)
 	for i := 0; i < threads; i++ {
-		ts, err := NewThreadStat()
+		ts, err := NewMetric()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		threadStats = append(threadStats, ts)
 		preparedThreads = append(preparedThreads, NewThread(sharedId.GetId(), ts, statementExecutor, logger))
 	}
-	return preparedThreads, threadStats, nil
+	return preparedThreads, nil
 }
 
 type SharedId struct {

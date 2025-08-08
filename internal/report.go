@@ -40,18 +40,18 @@ type QueryData struct {
 }
 
 type ThreadData struct {
-	ThreadCount    int   `json:"thread_count"`
+	ThreadCount    int64 `json:"thread_count"`
 	IterationCount int64 `json:"iteration_count"`
 }
 
-func GenerateReport(cfg *RunConfig, globalMetric *GlobalMetric) error {
+func GenerateReport(cfg *RunConfig, scenariosMetrics []*Metric) error {
 	if cfg.OutputConfig == nil || cfg.OutputConfig.ReportConfig == nil {
 		return nil
 	}
-	report := getReportData(cfg, globalMetric)
+	calculateReports(cfg, scenariosMetrics)
 	reportCfg := cfg.OutputConfig.ReportConfig
 	if reportCfg.ToConsole {
-		printColorReport(report)
+		printColorReport(cfg)
 	}
 
 	if reportCfg.ToFile {
@@ -62,7 +62,7 @@ func GenerateReport(cfg *RunConfig, globalMetric *GlobalMetric) error {
 			return err
 		}
 
-		data, err := json.MarshalIndent(report, "", "  ")
+		data, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {
 			return err
 		}
@@ -77,79 +77,79 @@ func GenerateReport(cfg *RunConfig, globalMetric *GlobalMetric) error {
 	return nil
 }
 
-func getReportData(cfg *RunConfig, globalMetric *GlobalMetric) *ReportData {
-	// Get percentiles
-	respMin, respMax := globalMetric.Td.Quantile(0.00), globalMetric.Td.Quantile(1)
-	p50, p90, p95 := globalMetric.Td.Quantile(0.50), globalMetric.Td.Quantile(0.90), globalMetric.Td.Quantile(0.95)
+func calculateReports(cfg *RunConfig, scenariosMetrics []*Metric) {
+	scenariosCfg := cfg.WorkflowConfig.Scenarios
+	for idx, sc := range scenariosMetrics {
+		// Get percentiles
+		respMin, respMax := sc.Td.Quantile(0.00), sc.Td.Quantile(1)
+		p50, p90, p95 := sc.Td.Quantile(0.50), sc.Td.Quantile(0.90), sc.Td.Quantile(0.95)
 
-	// Get test duration
-	startAt := globalMetric.StartAt
-	endAt := globalMetric.EndAt
-	testDur := endAt.Sub(startAt)
-	return &ReportData{
-		RunConfig:    *cfg,
-		TestDuration: testDur.String(),
-		QueryData: QueryData{
-			TotalCount:        globalMetric.QueriesTotal,
-			QPS:               fmt.Sprintf("%.2f", globalMetric.GetQPS()),
+		scenariosCfg[idx].Report = &Report{
+			Duration:          sc.StopTime.Sub(sc.StartTime).String(),
+			ThreadsTotal:      sc.ThreadsTotal,
+			IterationsTotal:   sc.IterationsTotal,
+			QueriesTotal:      sc.QueriesTotal,
+			QPS:               fmt.Sprintf("%.2f", sc.GetQPS()),
 			RespMin:           time.Duration(respMin).String(),
 			RespMax:           time.Duration(respMax).String(),
-			SuccessRate:       fmt.Sprintf("%.2f%%", globalMetric.GetSuccessRate()),
-			FailedRate:        fmt.Sprintf("%.2f%%", globalMetric.GetFailedRate()),
+			SuccessRate:       fmt.Sprintf("%.2f%%", sc.GetSuccessRate()),
+			FailedRate:        fmt.Sprintf("%.2f%%", sc.GetFailedRate()),
 			P50:               time.Duration(p50).String(),
 			P90:               time.Duration(p90).String(),
 			P95:               time.Duration(p95).String(),
-			RowsAffectedTotal: globalMetric.RowsAffectedTotal,
-			ErrCount:          globalMetric.ErrorsTotal,
-			TopErrors:         getTopErrors(globalMetric.ErrMap),
-		},
-		ThreadData: ThreadData{
-			ThreadCount:    globalMetric.ThreadsTotal,
-			IterationCount: globalMetric.IterationsTotal,
-		},
+			RowsAffectedTotal: sc.RowsAffected,
+			ErrCount:          sc.ErrorsTotal,
+			TopErrors:         getTopErrors(sc.ErrMap),
+		}
 	}
 }
 
-func printColorReport(report *ReportData) {
+func printColorReport(cfg *RunConfig) {
+	scenariosCfg := cfg.WorkflowConfig.Scenarios
+
 	bold := color.New(color.Bold).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	cyan := color.New(color.FgCyan).SprintFunc()
 
 	fmt.Print(bold("\n========== LoadHound Report ==========\n"))
-	fmt.Printf("duration: %s\n", cyan(report.TestDuration))
-	fmt.Println()
+	for _, sc := range scenariosCfg {
+		report := sc.Report
+		fmt.Println()
+		fmt.Println(bold(fmt.Sprintf("Name: %s", sc.Name)))
 
-	fmt.Println(bold("Query"))
-	fmt.Printf("total: %s success_rate: %s failed_rate: %s\n",
-		cyan(report.QueryData.TotalCount),
-		cyan(report.QueryData.SuccessRate),
-		cyan(report.QueryData.FailedRate))
+		fmt.Printf("duration: %s\n", cyan(report.Duration))
 
-	fmt.Printf("qps: %s affected rows: %s\n",
-		cyan(report.QueryData.QPS),
-		cyan(report.QueryData.RowsAffectedTotal))
+		fmt.Printf("queries total: %s success_rate: %s failed_rate: %s\n",
+			cyan(report.QueriesTotal),
+			cyan(report.SuccessRate),
+			cyan(report.FailedRate))
 
-	fmt.Printf("response time - min: %s  max: %s\n",
-		cyan(report.QueryData.RespMin),
-		cyan(report.QueryData.RespMax))
-	fmt.Printf("response time - p50: %s  p90: %s  p95: %s\n",
-		cyan(report.QueryData.P50),
-		cyan(report.QueryData.P90),
-		cyan(report.QueryData.P95))
-	fmt.Println()
+		fmt.Printf("qps: %s affected rows: %s\n",
+			cyan(report.QPS),
+			cyan(report.RowsAffectedTotal))
 
-	fmt.Println(bold("Thread"))
-	fmt.Printf("thread count: %s\n", cyan(report.ThreadData.ThreadCount))
-	fmt.Printf("iteration count: %s\n", cyan(report.ThreadData.IterationCount))
-	fmt.Println()
+		fmt.Printf("response time - min: %s  max: %s\n",
+			cyan(report.RespMin),
+			cyan(report.RespMax))
+		fmt.Printf("response time - p50: %s  p90: %s  p95: %s\n",
+			cyan(report.P50),
+			cyan(report.P90),
+			cyan(report.P95))
+		fmt.Println()
 
-	fmt.Println(bold("Errors"))
-	fmt.Printf("errors count: %s\n", cyan(report.QueryData.ErrCount))
-	if len(report.QueryData.TopErrors) == 0 {
-		fmt.Println(green("No errors recorded."))
-	} else {
-		for idx, err := range report.QueryData.TopErrors {
-			fmt.Printf("%d. %s\n", idx+1, err)
+		fmt.Println(bold("Thread"))
+		fmt.Printf("thread count: %s\n", cyan(report.ThreadsTotal))
+		fmt.Printf("iteration count: %s\n", cyan(report.IterationsTotal))
+		fmt.Println()
+
+		fmt.Println(bold("Errors"))
+		fmt.Printf("errors count: %s\n", cyan(report.ErrCount))
+		if len(report.TopErrors) == 0 {
+			fmt.Println(green("No errors recorded."))
+		} else {
+			for idx, err := range report.TopErrors {
+				fmt.Printf("%d. %s\n", idx+1, err)
+			}
 		}
 	}
 }

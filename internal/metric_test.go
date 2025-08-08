@@ -16,631 +16,525 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewThreadStat(t *testing.T) {
-	tests := []struct {
-		name      string
-		wantError bool
-		validate  func(t *testing.T, ts *ThreadStat)
-	}{
-		{
-			name:      "successful creation",
-			wantError: false,
-			validate: func(t *testing.T, ts *ThreadStat) {
-				assert.NotNil(t, ts.td)
-				assert.NotNil(t, ts.errMap)
-				assert.Empty(t, ts.errMap)
-				assert.Equal(t, int64(0), ts.iterationsTotal)
-				assert.Equal(t, int64(0), ts.rowsAffected)
-				assert.Equal(t, int64(0), ts.queriesTotal)
-				assert.Equal(t, int64(0), ts.errorsTotal)
-				assert.True(t, ts.startTime.IsZero())
-				assert.True(t, ts.stopTime.IsZero())
-			},
-		},
-	}
+func TestNewMetric(t *testing.T) {
+	t.Run("should create new metric successfully", func(t *testing.T) {
+		metric, err := NewMetric()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewThreadStat()
-
-			if tt.wantError {
-				assert.Error(t, err)
-				assert.Nil(t, got)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, got)
-				if tt.validate != nil {
-					tt.validate(t, got)
-				}
-			}
-		})
-	}
+		require.NoError(t, err)
+		assert.NotNil(t, metric)
+		assert.NotNil(t, metric.mu)
+		assert.NotNil(t, metric.Td)
+		assert.NotNil(t, metric.ErrMap)
+		assert.Equal(t, int64(0), metric.IterationsTotal)
+		assert.Equal(t, int64(0), metric.ThreadsTotal)
+		assert.Equal(t, int64(0), metric.RowsAffected)
+		assert.Equal(t, int64(0), metric.QueriesTotal)
+		assert.Equal(t, int64(0), metric.ErrorsTotal)
+		assert.True(t, metric.StartTime.IsZero())
+		assert.True(t, metric.StopTime.IsZero())
+		assert.Empty(t, metric.ErrMap)
+	})
 }
 
-func TestThreadStat_SetStartTime(t *testing.T) {
-	tests := []struct {
-		name      string
-		startTime time.Time
-		validate  func(t *testing.T, ts *ThreadStat)
-	}{
-		{
-			name:      "set valid start time",
-			startTime: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			validate: func(t *testing.T, ts *ThreadStat) {
-				expected := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-				assert.Equal(t, expected, ts.startTime)
-			},
-		},
-		{
-			name:      "set zero time",
-			startTime: time.Time{},
-			validate: func(t *testing.T, ts *ThreadStat) {
-				assert.True(t, ts.startTime.IsZero())
-			},
-		},
-		{
-			name:      "set current time",
-			startTime: time.Now(),
-			validate: func(t *testing.T, ts *ThreadStat) {
-				assert.False(t, ts.startTime.IsZero())
-				assert.WithinDuration(t, time.Now(), ts.startTime, time.Second)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts, err := NewThreadStat()
-			require.NoError(t, err)
-
-			ts.SetStartTime(tt.startTime)
-
-			if tt.validate != nil {
-				tt.validate(t, ts)
-			}
-		})
-	}
-}
-
-func TestThreadStat_SetStopTime(t *testing.T) {
-	baseTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name      string
-		startTime time.Time
-		stopTime  time.Time
-		expected  time.Time
-		shouldSet bool
-	}{
-		{
-			name:      "valid stop time after start time",
-			startTime: baseTime,
-			stopTime:  baseTime.Add(10 * time.Second),
-			expected:  baseTime.Add(10 * time.Second),
-			shouldSet: true,
-		},
-		{
-			name:      "stop time before start time - should not set",
-			startTime: baseTime,
-			stopTime:  baseTime.Add(-10 * time.Second),
-			expected:  time.Time{},
-			shouldSet: false,
-		},
-		{
-			name:      "stop time equals start time",
-			startTime: baseTime,
-			stopTime:  baseTime,
-			expected:  baseTime,
-			shouldSet: true,
-		},
-		{
-			name:      "zero start time - should set any stop time",
-			startTime: time.Time{},
-			stopTime:  baseTime,
-			expected:  baseTime,
-			shouldSet: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts, err := NewThreadStat()
-			require.NoError(t, err)
-
-			if !tt.startTime.IsZero() {
-				ts.SetStartTime(tt.startTime)
-			}
-
-			ts.SetStopTime(tt.stopTime)
-
-			if tt.shouldSet {
-				assert.Equal(t, tt.expected, ts.stopTime)
-			} else {
-				assert.True(t, ts.stopTime.IsZero())
-			}
-		})
-	}
-}
-
-func TestThreadStat_AddIter(t *testing.T) {
-	tests := []struct {
-		name          string
-		iterations    int
-		expectedTotal int64
-	}{
-		{
-			name:          "single iteration",
-			iterations:    1,
-			expectedTotal: 1,
-		},
-		{
-			name:          "multiple iterations",
-			iterations:    10,
-			expectedTotal: 10,
-		},
-		{
-			name:          "zero iterations",
-			iterations:    0,
-			expectedTotal: 0,
-		},
-		{
-			name:          "large number of iterations",
-			iterations:    1000,
-			expectedTotal: 1000,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts, err := NewThreadStat()
-			require.NoError(t, err)
-
-			for i := 0; i < tt.iterations; i++ {
-				ts.AddIter()
-			}
-
-			assert.Equal(t, tt.expectedTotal, ts.iterationsTotal)
-		})
-	}
-}
-
-func TestThreadStat_SubmitQueryResult(t *testing.T) {
-	tests := []struct {
-		name              string
-		queryResult       *QueryResult
-		expectedQueries   int64
-		expectedRows      int64
-		expectedErrors    int64
-		expectedErrMapLen int
-		validate          func(t *testing.T, ts *ThreadStat)
-	}{
-		{
-			name:              "nil query result",
-			queryResult:       nil,
-			expectedQueries:   0,
-			expectedRows:      0,
-			expectedErrors:    0,
-			expectedErrMapLen: 0,
-		},
-		{
-			name: "successful query result",
-			queryResult: &QueryResult{
-				RowsAffected: 5,
-				ResponseTime: 100 * time.Millisecond,
-				Err:          nil,
-			},
-			expectedQueries:   1,
-			expectedRows:      5,
-			expectedErrors:    0,
-			expectedErrMapLen: 0,
-		},
-		{
-			name: "query result with error",
-			queryResult: &QueryResult{
-				RowsAffected: 0,
-				ResponseTime: 50 * time.Millisecond,
-				Err:          errors.New("database connection failed"),
-			},
-			expectedQueries:   1,
-			expectedRows:      0,
-			expectedErrors:    1,
-			expectedErrMapLen: 1,
-			validate: func(t *testing.T, ts *ThreadStat) {
-				assert.Equal(t, int64(1), ts.errMap["database connection failed"])
-			},
-		},
-		{
-			name: "multiple successful queries",
-			queryResult: &QueryResult{
-				RowsAffected: 3,
-				ResponseTime: 75 * time.Millisecond,
-				Err:          nil,
-			},
-			expectedQueries:   1,
-			expectedRows:      3,
-			expectedErrors:    0,
-			expectedErrMapLen: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts, err := NewThreadStat()
-			require.NoError(t, err)
-
-			err = ts.SubmitQueryResult(tt.queryResult)
-			require.NoError(t, err)
-
-			assert.Equal(t, tt.expectedQueries, ts.queriesTotal)
-			assert.Equal(t, tt.expectedRows, ts.rowsAffected)
-			assert.Equal(t, tt.expectedErrors, ts.errorsTotal)
-			assert.Len(t, ts.errMap, tt.expectedErrMapLen)
-
-			if tt.validate != nil {
-				tt.validate(t, ts)
-			}
-		})
-	}
-}
-
-func TestThreadStat_SubmitQueryResult_MultipleResults(t *testing.T) {
-	ts, err := NewThreadStat()
+func TestMetric_SetStartTime(t *testing.T) {
+	metric, err := NewMetric()
 	require.NoError(t, err)
 
-	// Submit multiple results
-	results := []*QueryResult{
-		{RowsAffected: 1, ResponseTime: 10 * time.Millisecond, Err: nil},
-		{RowsAffected: 2, ResponseTime: 20 * time.Millisecond, Err: errors.New("error1")},
-		{RowsAffected: 3, ResponseTime: 30 * time.Millisecond, Err: nil},
-		{RowsAffected: 0, ResponseTime: 40 * time.Millisecond, Err: errors.New("error1")}, // Same error
-		{RowsAffected: 1, ResponseTime: 50 * time.Millisecond, Err: errors.New("error2")}, // Different error
-	}
+	testTime := time.Now()
 
-	for _, result := range results {
-		err := ts.SubmitQueryResult(result)
+	t.Run("should set start time", func(t *testing.T) {
+		metric.SetStartTime(testTime)
+
+		assert.Equal(t, testTime, metric.StartTime)
+	})
+
+	t.Run("should update start time if called multiple times", func(t *testing.T) {
+		newTime := testTime.Add(time.Hour)
+		metric.SetStartTime(newTime)
+
+		assert.Equal(t, newTime, metric.StartTime)
+	})
+}
+
+func TestMetric_SetStopTime(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
+
+	startTime := time.Now()
+	metric.SetStartTime(startTime)
+
+	t.Run("should set stop time when after start time", func(t *testing.T) {
+		stopTime := startTime.Add(time.Minute)
+		metric.SetStopTime(stopTime)
+
+		assert.Equal(t, stopTime, metric.StopTime)
+	})
+
+	t.Run("should not set stop time when before start time", func(t *testing.T) {
+		originalStopTime := metric.StopTime
+		beforeStartTime := startTime.Add(-time.Minute)
+		metric.SetStopTime(beforeStartTime)
+
+		assert.Equal(t, originalStopTime, metric.StopTime)
+		assert.NotEqual(t, beforeStartTime, metric.StopTime)
+	})
+
+	t.Run("should set stop time when start time is zero", func(t *testing.T) {
+		metricWithoutStart, err := NewMetric()
 		require.NoError(t, err)
-	}
 
-	assert.Equal(t, int64(5), ts.queriesTotal)
-	assert.Equal(t, int64(7), ts.rowsAffected) // 1+2+3+0+1
-	assert.Equal(t, int64(3), ts.errorsTotal)
-	assert.Len(t, ts.errMap, 2)
-	assert.Equal(t, int64(2), ts.errMap["error1"])
-	assert.Equal(t, int64(1), ts.errMap["error2"])
+		stopTime := time.Now()
+		metricWithoutStart.SetStopTime(stopTime)
+
+		assert.Equal(t, stopTime, metricWithoutStart.StopTime)
+	})
+
+	t.Run("should set stop time equal to start time", func(t *testing.T) {
+		metric.SetStopTime(startTime)
+
+		assert.Equal(t, startTime, metric.StopTime)
+	})
 }
 
-func TestNewGlobalMetric(t *testing.T) {
-	tests := []struct {
-		name        string
-		threadStats []*ThreadStat
-		validate    func(t *testing.T, gm *GlobalMetric)
-	}{
-		{
-			name:        "empty thread stats",
-			threadStats: []*ThreadStat{},
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.NotNil(t, gm.Td)
-				assert.NotNil(t, gm.ErrMap)
-				assert.Empty(t, gm.ErrMap)
-				assert.Equal(t, int64(0), gm.QueriesTotal)
-				assert.Equal(t, 0.0, gm.Qps)
-				assert.Equal(t, 0, gm.ThreadsTotal)
-			},
-		},
-		{
-			name:        "nil thread stats",
-			threadStats: nil,
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.NotNil(t, gm.Td)
-				assert.NotNil(t, gm.ErrMap)
-				assert.Nil(t, gm.threadStats)
-			},
-		},
-		{
-			name: "with thread stats",
-			threadStats: func() []*ThreadStat {
-				ts1, _ := NewThreadStat()
-				ts2, _ := NewThreadStat()
-				return []*ThreadStat{ts1, ts2}
-			}(),
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.NotNil(t, gm.Td)
-				assert.NotNil(t, gm.ErrMap)
-				assert.Len(t, gm.threadStats, 2)
-			},
-		},
+func TestMetric_AddIter(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
+
+	t.Run("should increment iterations counter", func(t *testing.T) {
+		initialCount := metric.IterationsTotal
+
+		metric.AddIter()
+
+		assert.Equal(t, initialCount+1, metric.IterationsTotal)
+	})
+
+	t.Run("should increment multiple times", func(t *testing.T) {
+		initialCount := metric.IterationsTotal
+		iterations := 5
+
+		for i := 0; i < iterations; i++ {
+			metric.AddIter()
+		}
+
+		assert.Equal(t, initialCount+int64(iterations), metric.IterationsTotal)
+	})
+}
+
+func TestMetric_AddThread(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
+
+	t.Run("should increment threads counter", func(t *testing.T) {
+		initialCount := metric.ThreadsTotal
+
+		metric.AddThread()
+
+		assert.Equal(t, initialCount+1, metric.ThreadsTotal)
+	})
+
+	t.Run("should increment multiple times", func(t *testing.T) {
+		initialCount := metric.ThreadsTotal
+		threads := 3
+
+		for i := 0; i < threads; i++ {
+			metric.AddThread()
+		}
+
+		assert.Equal(t, initialCount+int64(threads), metric.ThreadsTotal)
+	})
+}
+
+func TestMetric_SubmitQueryResult(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
+
+	t.Run("should handle nil query result", func(t *testing.T) {
+		err := metric.SubmitQueryResult(nil)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), metric.QueriesTotal)
+		assert.Equal(t, int64(0), metric.ErrorsTotal)
+		assert.Equal(t, int64(0), metric.RowsAffected)
+	})
+
+	t.Run("should process successful query result", func(t *testing.T) {
+		queryResult := &QueryResult{
+			RowsAffected: 5,
+			ResponseTime: 100 * time.Millisecond,
+			Err:          nil,
+		}
+
+		err := metric.SubmitQueryResult(queryResult)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), metric.QueriesTotal)
+		assert.Equal(t, int64(0), metric.ErrorsTotal)
+		assert.Equal(t, int64(5), metric.RowsAffected)
+		assert.Empty(t, metric.ErrMap)
+	})
+
+	t.Run("should process failed query result", func(t *testing.T) {
+		testErr := errors.New("connection timeout")
+		queryResult := &QueryResult{
+			RowsAffected: 0,
+			ResponseTime: 50 * time.Millisecond,
+			Err:          testErr,
+		}
+
+		err := metric.SubmitQueryResult(queryResult)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(2), metric.QueriesTotal) // Previous test added 1
+		assert.Equal(t, int64(1), metric.ErrorsTotal)
+		assert.Equal(t, int64(5), metric.RowsAffected) // Same as previous
+		assert.Equal(t, int64(1), metric.ErrMap[testErr.Error()])
+	})
+
+	t.Run("should accumulate multiple errors of same type", func(t *testing.T) {
+		testErr := errors.New("connection timeout")
+		queryResult := &QueryResult{
+			RowsAffected: 2,
+			ResponseTime: 75 * time.Millisecond,
+			Err:          testErr,
+		}
+
+		err := metric.SubmitQueryResult(queryResult)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(3), metric.QueriesTotal)
+		assert.Equal(t, int64(2), metric.ErrorsTotal)
+		assert.Equal(t, int64(7), metric.RowsAffected)
+		assert.Equal(t, int64(2), metric.ErrMap[testErr.Error()])
+	})
+
+	t.Run("should handle different error types", func(t *testing.T) {
+		differentErr := errors.New("syntax error")
+		queryResult := &QueryResult{
+			RowsAffected: 1,
+			ResponseTime: 25 * time.Millisecond,
+			Err:          differentErr,
+		}
+
+		err := metric.SubmitQueryResult(queryResult)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(4), metric.QueriesTotal)
+		assert.Equal(t, int64(3), metric.ErrorsTotal)
+		assert.Equal(t, int64(8), metric.RowsAffected)
+		assert.Equal(t, int64(2), metric.ErrMap["connection timeout"])
+		assert.Equal(t, int64(1), metric.ErrMap[differentErr.Error()])
+	})
+}
+
+func TestMetric_GetSnapshot(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
+
+	// Setup some data
+	startTime := time.Now()
+	stopTime := startTime.Add(time.Minute)
+	metric.SetStartTime(startTime)
+	metric.SetStopTime(stopTime)
+	metric.AddIter()
+	metric.AddThread()
+
+	queryResult := &QueryResult{
+		RowsAffected: 10,
+		ResponseTime: 100 * time.Millisecond,
+		Err:          errors.New("test error"),
 	}
+	err = metric.SubmitQueryResult(queryResult)
+	require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NewGlobalMetric(tt.threadStats)
-			require.NotNil(t, got)
+	t.Run("should create accurate snapshot", func(t *testing.T) {
+		snapshot := metric.GetSnapshot()
 
-			if tt.validate != nil {
-				tt.validate(t, got)
+		assert.NotNil(t, snapshot)
+		assert.Equal(t, metric.StartTime, snapshot.StartTime)
+		assert.Equal(t, metric.StopTime, snapshot.StopTime)
+		assert.Equal(t, metric.IterationsTotal, snapshot.IterationsTotal)
+		assert.Equal(t, metric.RowsAffected, snapshot.RowsAffected)
+		assert.Equal(t, metric.QueriesTotal, snapshot.QueriesTotal)
+		assert.Equal(t, metric.ErrorsTotal, snapshot.ErrorsTotal)
+
+		// Verify error map is copied
+		assert.Equal(t, len(metric.ErrMap), len(snapshot.ErrMap))
+		for k, v := range metric.ErrMap {
+			assert.Equal(t, v, snapshot.ErrMap[k])
+		}
+
+		// Verify TDigest is cloned (not the same instance)
+		assert.NotSame(t, metric.Td, snapshot.Td)
+	})
+
+	t.Run("snapshot should be independent", func(t *testing.T) {
+		snapshot := metric.GetSnapshot()
+		originalQueries := snapshot.QueriesTotal
+
+		// Modify original metric
+		metric.AddIter()
+		successResult := &QueryResult{
+			RowsAffected: 5,
+			ResponseTime: 50 * time.Millisecond,
+			Err:          nil,
+		}
+		err = metric.SubmitQueryResult(successResult)
+		require.NoError(t, err)
+
+		// Snapshot should remain unchanged
+		assert.Equal(t, originalQueries, snapshot.QueriesTotal)
+		assert.NotEqual(t, metric.QueriesTotal, snapshot.QueriesTotal)
+	})
+}
+
+func TestMetric_GetQPS(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
+
+	t.Run("should return 0 when no time duration", func(t *testing.T) {
+		qps := metric.GetQPS()
+
+		assert.Equal(t, float64(0), qps)
+	})
+
+	t.Run("should return 0 when stop time before start time", func(t *testing.T) {
+		now := time.Now()
+		metric.SetStartTime(now)
+		metric.SetStopTime(now.Add(-time.Second))
+
+		qps := metric.GetQPS()
+
+		assert.Equal(t, float64(0), qps)
+	})
+
+	t.Run("should calculate QPS correctly", func(t *testing.T) {
+		startTime := time.Now()
+		metric.SetStartTime(startTime)
+		metric.SetStopTime(startTime.Add(10 * time.Second))
+
+		// Add some queries
+		for i := 0; i < 50; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 1,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          nil,
 			}
-		})
-	}
-}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
 
-func TestGlobalMetric_Collect(t *testing.T) {
-	tests := []struct {
-		name         string
-		setupThreads func() []*ThreadStat
-		expectedQPS  float64
-		validate     func(t *testing.T, gm *GlobalMetric)
-	}{
-		{
-			name: "collect from single thread",
-			setupThreads: func() []*ThreadStat {
-				ts, _ := NewThreadStat()
-				err := ts.SubmitQueryResult(&QueryResult{RowsAffected: 10, ResponseTime: 100 * time.Millisecond})
-				require.NoError(t, err)
-				err = ts.SubmitQueryResult(&QueryResult{RowsAffected: 5, ResponseTime: 150 * time.Millisecond})
-				require.NoError(t, err)
-				return []*ThreadStat{ts}
-			},
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.Equal(t, int64(2), gm.QueriesTotal)
-				assert.Equal(t, int64(15), gm.RowsAffectedTotal)
-				assert.Equal(t, int64(0), gm.ErrorsTotal)
-				assert.Empty(t, gm.ErrMap)
-			},
-		},
-		{
-			name: "collect from multiple threads",
-			setupThreads: func() []*ThreadStat {
-				ts1, _ := NewThreadStat()
-				err := ts1.SubmitQueryResult(&QueryResult{RowsAffected: 1, ResponseTime: 50 * time.Millisecond})
-				require.NoError(t, err)
-				ts1.AddIter()
+		qps := metric.GetQPS()
 
-				ts2, _ := NewThreadStat()
-				err = ts2.SubmitQueryResult(&QueryResult{RowsAffected: 2, ResponseTime: 75 * time.Millisecond, Err: errors.New("test error")})
-				require.NoError(t, err)
-				ts2.AddIter()
-				ts2.AddIter()
+		assert.Equal(t, float64(5), qps) // 50 queries / 10 seconds = 5 QPS
+	})
 
-				return []*ThreadStat{ts1, ts2}
-			},
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.Equal(t, int64(2), gm.QueriesTotal)
-				assert.Equal(t, int64(3), gm.RowsAffectedTotal)
-				assert.Equal(t, int64(1), gm.ErrorsTotal)
-				assert.Equal(t, int64(3), gm.IterationsTotal)
-				assert.Len(t, gm.ErrMap, 1)
-				assert.Equal(t, int64(1), gm.ErrMap["test error"])
-			},
-		},
-		{
-			name: "collect with nil thread stats",
-			setupThreads: func() []*ThreadStat {
-				return nil
-			},
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.Equal(t, int64(0), gm.QueriesTotal)
-				assert.Equal(t, int64(0), gm.RowsAffectedTotal)
-				assert.Equal(t, int64(0), gm.ErrorsTotal)
-				assert.Empty(t, gm.ErrMap)
-			},
-		},
-		{
-			name: "collect with nil thread in slice",
-			setupThreads: func() []*ThreadStat {
-				ts, _ := NewThreadStat()
-				err := ts.SubmitQueryResult(&QueryResult{RowsAffected: 5, ResponseTime: 100 * time.Millisecond})
-				require.NoError(t, err)
-				return []*ThreadStat{ts, nil}
-			},
-			validate: func(t *testing.T, gm *GlobalMetric) {
-				assert.Equal(t, int64(1), gm.QueriesTotal)
-				assert.Equal(t, int64(5), gm.RowsAffectedTotal)
-			},
-		},
-	}
+	t.Run("should handle fractional QPS", func(t *testing.T) {
+		metric, err := NewMetric()
+		require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			threadStats := tt.setupThreads()
-			gm := NewGlobalMetric(threadStats)
+		startTime := time.Now()
+		metric.SetStartTime(startTime)
+		metric.SetStopTime(startTime.Add(3 * time.Second))
 
-			// Set time range for QPS calculation
-			gm.StartAt = time.Now().Add(-1 * time.Second)
-			gm.EndAt = time.Now()
-
-			gm.Collect()
-
-			if tt.validate != nil {
-				tt.validate(t, gm)
+		// Add 10 queries
+		for i := 0; i < 10; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 1,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          nil,
 			}
-		})
-	}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		qps := metric.GetQPS()
+
+		assert.InDelta(t, 3.333333, qps, 0.0001) // 10 queries / 3 seconds ≈ 3.33 QPS
+	})
 }
 
-func TestGlobalMetric_GetQPS(t *testing.T) {
-	tests := []struct {
-		name         string
-		startAt      time.Time
-		endAt        time.Time
-		queriesTotal int64
-		expectedQPS  float64
-	}{
-		{
-			name:         "normal case - 10 queries in 2 seconds",
-			startAt:      time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			endAt:        time.Date(2025, 1, 1, 12, 0, 2, 0, time.UTC),
-			queriesTotal: 10,
-			expectedQPS:  5.0,
-		},
-		{
-			name:         "zero duration",
-			startAt:      time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			endAt:        time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			queriesTotal: 10,
-			expectedQPS:  0.0,
-		},
-		{
-			name:         "negative duration",
-			startAt:      time.Date(2025, 1, 1, 12, 0, 2, 0, time.UTC),
-			endAt:        time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			queriesTotal: 10,
-			expectedQPS:  0.0,
-		},
-		{
-			name:         "zero queries",
-			startAt:      time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			endAt:        time.Date(2025, 1, 1, 12, 0, 1, 0, time.UTC),
-			queriesTotal: 0,
-			expectedQPS:  0.0,
-		},
-		{
-			name:         "high QPS - 1000 queries in 1 second",
-			startAt:      time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-			endAt:        time.Date(2025, 1, 1, 12, 0, 1, 0, time.UTC),
-			queriesTotal: 1000,
-			expectedQPS:  1000.0,
-		},
-	}
+func TestMetric_GetSuccessRate(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gm := NewGlobalMetric([]*ThreadStat{})
-			gm.StartAt = tt.startAt
-			gm.EndAt = tt.endAt
-			gm.QueriesTotal = tt.queriesTotal
+	t.Run("should return 0 when no queries", func(t *testing.T) {
+		rate := metric.GetSuccessRate()
 
-			got := gm.GetQPS()
-			assert.Equal(t, tt.expectedQPS, got)
-		})
-	}
+		assert.Equal(t, float64(0), rate)
+	})
+
+	t.Run("should return 100% for all successful queries", func(t *testing.T) {
+		for i := 0; i < 10; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 1,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          nil,
+			}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		rate := metric.GetSuccessRate()
+
+		assert.Equal(t, float64(100), rate)
+	})
+
+	t.Run("should calculate correct success rate with mixed results", func(t *testing.T) {
+		// Add 5 failed queries
+		for i := 0; i < 5; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 0,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          errors.New("error"),
+			}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		rate := metric.GetSuccessRate()
+
+		// 10 successful + 5 failed = 15 total
+		// 10 successful / 15 total * 100 = 66.67%
+		assert.InDelta(t, 66.666666, rate, 0.0001)
+	})
+
+	t.Run("should return 0% for all failed queries", func(t *testing.T) {
+		metric, err := NewMetric()
+		require.NoError(t, err)
+
+		for i := 0; i < 5; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 0,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          errors.New("error"),
+			}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		rate := metric.GetSuccessRate()
+
+		assert.Equal(t, float64(0), rate)
+	})
 }
 
-func TestGlobalMetric_GetSuccessRate(t *testing.T) {
-	tests := []struct {
-		name         string
-		queriesTotal int64
-		errorsTotal  int64
-		expectedRate float64
-	}{
-		{
-			name:         "100% success rate",
-			queriesTotal: 100,
-			errorsTotal:  0,
-			expectedRate: 100.0,
-		},
-		{
-			name:         "50% success rate",
-			queriesTotal: 100,
-			errorsTotal:  50,
-			expectedRate: 50.0,
-		},
-		{
-			name:         "0% success rate",
-			queriesTotal: 100,
-			errorsTotal:  100,
-			expectedRate: 0.0,
-		},
-		{
-			name:         "zero queries",
-			queriesTotal: 0,
-			errorsTotal:  0,
-			expectedRate: 0.0,
-		},
-		{
-			name:         "single successful query",
-			queriesTotal: 1,
-			errorsTotal:  0,
-			expectedRate: 100.0,
-		},
-		{
-			name:         "single failed query",
-			queriesTotal: 1,
-			errorsTotal:  1,
-			expectedRate: 0.0,
-		},
-	}
+func TestMetric_GetFailedRate(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gm := NewGlobalMetric([]*ThreadStat{})
-			gm.QueriesTotal = tt.queriesTotal
-			gm.ErrorsTotal = tt.errorsTotal
+	t.Run("should return 0 when no queries", func(t *testing.T) {
+		rate := metric.GetFailedRate()
 
-			got := gm.GetSuccessRate()
-			assert.Equal(t, tt.expectedRate, got)
-		})
-	}
+		assert.Equal(t, float64(0), rate)
+	})
+
+	t.Run("should return 0% for all successful queries", func(t *testing.T) {
+		for i := 0; i < 10; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 1,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          nil,
+			}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		rate := metric.GetFailedRate()
+
+		assert.Equal(t, float64(0), rate)
+	})
+
+	t.Run("should calculate correct failure rate with mixed results", func(t *testing.T) {
+		// Add 5 failed queries to the 10 successful ones
+		for i := 0; i < 5; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 0,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          errors.New("error"),
+			}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		rate := metric.GetFailedRate()
+
+		// 5 failed / 15 total * 100 = 33.33%
+		assert.InDelta(t, 33.333333, rate, 0.0001)
+	})
+
+	t.Run("should return 100% for all failed queries", func(t *testing.T) {
+		metric, err := NewMetric()
+		require.NoError(t, err)
+
+		for i := 0; i < 5; i++ {
+			queryResult := &QueryResult{
+				RowsAffected: 0,
+				ResponseTime: 10 * time.Millisecond,
+				Err:          errors.New("error"),
+			}
+			err = metric.SubmitQueryResult(queryResult)
+			require.NoError(t, err)
+		}
+
+		rate := metric.GetFailedRate()
+
+		assert.Equal(t, float64(100), rate)
+	})
 }
 
-func TestGlobalMetric_GetFailedRate(t *testing.T) {
-	tests := []struct {
-		name         string
-		queriesTotal int64
-		errorsTotal  int64
-		expectedRate float64
-	}{
-		{
-			name:         "0% failure rate",
-			queriesTotal: 100,
-			errorsTotal:  0,
-			expectedRate: 0.0,
-		},
-		{
-			name:         "50% failure rate",
-			queriesTotal: 100,
-			errorsTotal:  50,
-			expectedRate: 50.0,
-		},
-		{
-			name:         "100% failure rate",
-			queriesTotal: 100,
-			errorsTotal:  100,
-			expectedRate: 100.0,
-		},
-		{
-			name:         "zero queries",
-			queriesTotal: 0,
-			errorsTotal:  0,
-			expectedRate: 0.0,
-		},
-		{
-			name:         "single successful query",
-			queriesTotal: 1,
-			errorsTotal:  0,
-			expectedRate: 0.0,
-		},
-		{
-			name:         "single failed query",
-			queriesTotal: 1,
-			errorsTotal:  1,
-			expectedRate: 100.0,
-		},
-	}
+func TestMetric_ConcurrencySafety(t *testing.T) {
+	metric, err := NewMetric()
+	require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gm := NewGlobalMetric([]*ThreadStat{})
-			gm.QueriesTotal = tt.queriesTotal
-			gm.ErrorsTotal = tt.errorsTotal
+	t.Run("should handle concurrent operations safely", func(t *testing.T) {
+		const numGoroutines = 10
+		const operationsPerGoroutine = 100
 
-			got := gm.GetFailedRate()
-			assert.Equal(t, tt.expectedRate, got)
-		})
-	}
-}
+		done := make(chan bool, numGoroutines)
 
-// Benchmark tests
-func BenchmarkThreadStat_SubmitQueryResult(b *testing.B) {
-	ts, _ := NewThreadStat()
-	result := &QueryResult{
-		RowsAffected: 1000,
-		ResponseTime: 250 * time.Millisecond,
-		Err:          nil,
-	}
+		// Start multiple goroutines performing various operations
+		for i := 0; i < numGoroutines; i++ {
+			go func() {
+				defer func() { done <- true }()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		err := ts.SubmitQueryResult(result)
-		require.NoError(b, err)
-	}
+				for j := 0; j < operationsPerGoroutine; j++ {
+					metric.AddIter()
+					metric.AddThread()
+
+					queryResult := &QueryResult{
+						RowsAffected: 1,
+						ResponseTime: time.Duration(j) * time.Millisecond,
+						Err:          nil,
+					}
+					if j%10 == 0 {
+						queryResult.Err = errors.New("test error")
+					}
+
+					_ = metric.SubmitQueryResult(queryResult)
+				}
+			}()
+		}
+
+		// Wait for all goroutines to complete
+		for i := 0; i < numGoroutines; i++ {
+			<-done
+		}
+
+		// Verify final counts
+		assert.Equal(t, int64(numGoroutines*operationsPerGoroutine), metric.IterationsTotal)
+		assert.Equal(t, int64(numGoroutines*operationsPerGoroutine), metric.ThreadsTotal)
+		assert.Equal(t, int64(numGoroutines*operationsPerGoroutine), metric.QueriesTotal)
+
+		// Verify error tracking
+		expectedErrors := int64(numGoroutines * (operationsPerGoroutine / 10)) // Every 10th operation fails
+		assert.Equal(t, expectedErrors, metric.ErrorsTotal)
+		assert.Equal(t, expectedErrors, metric.ErrMap["test error"])
+
+		// Test concurrent snapshots
+		snapshot1 := metric.GetSnapshot()
+		snapshot2 := metric.GetSnapshot()
+
+		assert.Equal(t, snapshot1.QueriesTotal, snapshot2.QueriesTotal)
+		assert.Equal(t, snapshot1.ErrorsTotal, snapshot2.ErrorsTotal)
+	})
 }

@@ -59,16 +59,14 @@ func TestInitThreads(t *testing.T) {
 			sharedId := NewSharedId()
 			logger := zerolog.Nop()
 
-			threads, threadStats, err := InitThreads(tt.threads, sharedId, mockExecutor, &logger)
+			threads, err := InitThreads(tt.threads, sharedId, mockExecutor, &logger)
 
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, threads)
-				assert.Nil(t, threadStats)
 			} else {
 				assert.NoError(t, err)
 				assert.Len(t, threads, tt.threads)
-				assert.Len(t, threadStats, tt.threads)
 
 				// Verify thread IDs are sequential and unique
 				expectedIds := make(map[int]bool)
@@ -82,16 +80,6 @@ func TestInitThreads(t *testing.T) {
 					assert.NotContains(t, actualIds, thread.Id, "Thread ID should be unique")
 					actualIds[thread.Id] = true
 					assert.Contains(t, expectedIds, thread.Id, "Thread ID should be in expected range")
-				}
-
-				// Verify thread stats are properly initialized
-				for _, stat := range threadStats {
-					assert.NotNil(t, stat)
-					assert.NotNil(t, stat.td)
-					assert.NotNil(t, stat.errMap)
-					assert.Equal(t, int64(0), stat.iterationsTotal)
-					assert.Equal(t, int64(0), stat.queriesTotal)
-					assert.Equal(t, int64(0), stat.errorsTotal)
 				}
 			}
 		})

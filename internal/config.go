@@ -71,6 +71,25 @@ type ScenarioConfig struct {
 	Pacing          time.Duration    `toml:"pacing" json:"pacing"`         // Delay between thread iterations
 	RampUp          time.Duration    `toml:"ramp_up" json:"ramp_up"`       // Time to ramp from 0 to N threads
 	StatementConfig *StatementConfig `toml:"statement" json:"statement"`   // SQL statement to execute
+	Report          *Report          `json:"report"`
+}
+
+type Report struct {
+	Duration          string   `json:"scenario_duration"`
+	ThreadsTotal      int64    `json:"threads_total"`
+	IterationsTotal   int64    `json:"iterations_total"`
+	QueriesTotal      int64    `json:"queries_total"`
+	QPS               string   `json:"qps"`
+	RespMin           string   `json:"min_resp_time"`
+	RespMax           string   `json:"max_resp_time"`
+	SuccessRate       string   `json:"success_rate"`
+	FailedRate        string   `json:"failed_rate"`
+	P50               string   `json:"p50_resp_time"`
+	P90               string   `json:"p90_resp_time"`
+	P95               string   `json:"p95_resp_time"`
+	RowsAffectedTotal int64    `json:"affected_rows"`
+	ErrCount          int64    `json:"err_total"`
+	TopErrors         []string `json:"top_errors"`
 }
 
 func (sc *ScenarioConfig) MarshalJSON() ([]byte, error) {
