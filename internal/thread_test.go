@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caio/go-tdigest/v4"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,23 +31,6 @@ type MockStatementExecutor struct {
 func (m *MockStatementExecutor) Fn(ctx context.Context) *QueryResult {
 	args := m.Called(ctx)
 	return args.Get(0).(*QueryResult)
-}
-
-// Helper function to create test metric with some data
-func createTestMetric() *Metric {
-	td, _ := tdigest.New(tdigest.Compression(100.0))
-	return &Metric{
-		mu:              &sync.Mutex{},
-		Td:              td,
-		StartTime:       time.Time{},
-		StopTime:        time.Time{},
-		IterationsTotal: 5,
-		ThreadsTotal:    0,
-		RowsAffected:    10,
-		QueriesTotal:    5,
-		ErrorsTotal:     1,
-		ErrMap:          map[string]int64{"test error": 1},
-	}
 }
 
 // Tests for Thread (thread.go)
