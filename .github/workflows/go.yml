@@ -33,7 +33,7 @@ jobs:
           version: v2.1
   
       - name: Run tests and generate coverage profile
-        run: go test -coverprofile=cover.out ./...
+        run: go test -race -coverprofile=cover.out ./...
 
       - name: Update test coverage
         uses: vladopajic/go-test-coverage@v2

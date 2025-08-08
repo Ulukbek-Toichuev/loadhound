@@ -19,18 +19,22 @@ type ScenarioIter struct {
 	logger  *zerolog.Logger
 	cfg     *ScenarioConfig
 	threads []*Thread
+	Metric  *Metric
 }
 
-func NewScenarioIter(logger *zerolog.Logger, cfg *ScenarioConfig, threads []*Thread) *ScenarioIter {
+func NewScenarioIter(logger *zerolog.Logger, cfg *ScenarioConfig, threads []*Thread, m *Metric) *ScenarioIter {
 	return &ScenarioIter{
 		logger:  logger,
 		cfg:     cfg,
 		threads: threads,
+		Metric:  m,
 	}
 }
 
 func (sc *ScenarioIter) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
+
+	// if user set ramp_up param to run threads gradually
 	if sc.cfg.RampUp > 0 {
 		// Calculation ramp_up interval, min value is 10 millisecond
 		intervalDur := calculateRampUpInterval(sc.cfg.RampUp, sc.cfg.Threads)
@@ -39,6 +43,7 @@ func (sc *ScenarioIter) Run(ctx context.Context) error {
 		ticker := time.NewTicker(intervalDur)
 		defer ticker.Stop()
 
+		sc.Metric.SetStartTime(time.Now())
 		sc.logger.Debug().Str("ramp_up_interval", intervalDur.String()).Int("total_threads", len(sc.threads)).Msg("Ramp-up configuration calculated")
 		for _, thread := range sc.threads {
 			select {
@@ -51,6 +56,7 @@ func (sc *ScenarioIter) Run(ctx context.Context) error {
 			}
 		}
 	} else {
+		sc.Metric.SetStartTime(time.Now())
 		for _, thread := range sc.threads {
 			select {
 			case <-ctx.Done():
@@ -61,6 +67,26 @@ func (sc *ScenarioIter) Run(ctx context.Context) error {
 			}
 		}
 	}
+
+	// wait until all threads finish their work
 	wg.Wait()
+
+	// sum metrics from threads
+	sc.Metric.SetStopTime(time.Now())
+	for _, th := range sc.threads {
+		snapshot := th.Metric.GetSnapshot()
+		sc.Metric.IterationsTotal += snapshot.IterationsTotal
+		sc.Metric.RowsAffected += snapshot.RowsAffected
+		sc.Metric.QueriesTotal += snapshot.QueriesTotal
+		sc.Metric.ErrorsTotal += snapshot.ErrorsTotal
+		if err := sc.Metric.Td.Merge(snapshot.Td); err != nil {
+			return err
+		}
+		if len(snapshot.ErrMap) != 0 {
+			for k, v := range snapshot.ErrMap {
+				sc.Metric.ErrMap[k] = v
+			}
+		}
+	}
 	return nil
 }
